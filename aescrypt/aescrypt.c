@@ -62,10 +62,13 @@ static void printHex(unsigned char *k, unsigned int kl)
 
 int main(int argc, char *argv[])
 {
+  int padding_length = 0;
+
   int opt;
   unsigned int key_length = 128;
   unsigned int get_key = 0, decrypt_mode = 0, i, size, nsize = 0, verbose = 0;
   FILE *in = stdin, *out = stdout, *rand;
+
   struct aes_ctx ctx;
   unsigned char iv[16];
   unsigned char *buff = malloc(BSZ + 16), *outb = malloc(BSZ + 32);
@@ -134,40 +137,64 @@ int main(int argc, char *argv[])
       exit(0);
     }
     (void)aes_init_dec(&ctx, key_length, key);
+
     if (verbose == 1)
     {
       fprintf(stderr, "Initial vector = ");
       printHex(iv, 16 * 8);
       fprintf(stderr, "\n");
     }
+
     (void)aes_init_iv(&ctx, iv);
+
+    // TODO: create threads somewhere around here
+
     i = 0;
     while ((size = (unsigned int)fread(buff + i, 1, (size_t)(BSZ - i), in)) != 0)
     {
       if ((nsize != 0) && (i == 0))
       {
+        printf("1\n");
         (void)fwrite(outb, 1, BSZ, out);
       }
+
       if ((i + size) != BSZ)
       {
+        printf("2\n");
         i = size;
       }
       else
       {
+        printf("3\n");
         aes_dec_cbc(outb, buff, BSZ, &ctx);
         i = 0;
       }
       nsize += size;
     }
-    aes_dec_cbc(outb, buff, i, &ctx);
-    if ((i % 16) != 0)
+
+    printf("i: %d\n", i);
+
+    if (i > 0)
     {
-      (void)fwrite(outb, 1, (size_t)(i - 16), out);
+      printf("4\n");
+      aes_dec_cbc(outb, buff, i, &ctx);
     }
-    else
+
+    if (i == 0)
     {
-      (void)fwrite(outb, 1, (size_t)i, out);
+      printf("5\n");
+      i = BSZ;
     }
+
+    // --- Remove PKCS7 padding ---
+    // determine padding length by reading last byte
+    padding_length = *(outb + i - 1);
+
+    printf("\nlast char: %d\n", padding_length);
+    printf("--last char (hex): %x\n", padding_length);
+
+    (void)fwrite(outb, 1, (size_t)i - padding_length, out);
+
     if (verbose == 1)
     {
       fprintf(stderr, " -> %u kilobytes processed.\n", nsize >> 10);
@@ -175,55 +202,94 @@ int main(int argc, char *argv[])
   }
   else
   {
+    FILE *input_temp = fopen("input_temp.txt", "w");
+
     (void)aes_init_enc(&ctx, key_length, key);
     memset(outb + BSZ, 0, 16);
     if (!(rand = fopen("/dev/random", "r")))
       perror("Cannot get randomness");
     (void)fread(iv, 1, 16, rand);
     (void)fclose(rand);
+
     if (verbose == 1)
     {
       fprintf(stderr, "Initial vector = ");
       printHex(iv, 16 * 8);
       fprintf(stderr, "\n");
     }
+
     (void)fwrite(iv, 1, 16, out);
+    (void)fwrite(iv, 1, 16, input_temp);
+
     (void)aes_init_iv(&ctx, iv);
+
+    // TODO: create threads somewhere around here
+
     i = 0;
     while ((size = (unsigned int)fread(buff + i, 1, (size_t)(BSZ - i), in)) != 0)
     {
-      if ((nsize != 0) && (i == 0))
-      {
-        (void)fwrite(outb, 1, BSZ, out);
-      }
+      // TODO: maybe some refactoring here (is i needed?)
       if ((i + size) != BSZ)
       {
         i = size;
+        printf("1\n");
       }
       else
       {
+        printf("2\n");
         aes_enc_cbc(outb, buff, BSZ, &ctx);
         i = 0;
       }
       nsize += size;
+
+      if ((nsize != 0) && (i == 0))
+      {
+        (void)fwrite(outb, 1, BSZ, out);
+        (void)fwrite(buff, 1, BSZ, input_temp);
+        printf("3\n");
+      }
     }
+
+    // apply PKCS7 padding
+    padding_length = 16 - (nsize % 16);
+    printf("padding_length: %d\n", padding_length);
+    memset(buff + i, padding_length, padding_length);
+
     if ((i % 16) != 0)
     {
-      memset(buff + i, 0, 16);
-      aes_enc_cbc(outb, buff, i + 16, &ctx);
-      (void)fwrite(outb, 1, (size_t)(i + 16), out);
+      printf("4\n");
+
+      // padding_length = 16 - (i % 16);
+
+      // memset(buff + i, 0, 16);
+      // memset(buff + i, 0, padding_length);
+
+      // memset(buff + i, 0, padding_length);
+      // aes_enc_cbc(outb, buff, i + 16, &ctx);
+      aes_enc_cbc(outb, buff, i + padding_length, &ctx);
+
+      // (void)fwrite(outb, 1, (size_t)(i + 16), out);
+      (void)fwrite(outb, 1, (size_t)(i + padding_length), out);
+      (void)fwrite(buff, 1, (size_t)(i + padding_length), input_temp);
     }
     else
     {
-      aes_enc_cbc(outb, buff, i, &ctx);
-      (void)fwrite(outb, 1, (size_t)i, out);
+      printf("5\n");
+      // TODO: these are the same. REFACTOR
+      aes_enc_cbc(outb, buff, i + padding_length, &ctx);
+      (void)fwrite(outb, 1, (size_t)(i + padding_length), out);
+      (void)fwrite(buff, 1, (size_t)(i + padding_length), input_temp);
     }
+
     if (verbose == 1)
     {
       fprintf(stderr, " -> %u kilobytes processed.\n", nsize >> 10);
     }
   }
 
+  (void)fclose(in);
+  (void)fclose(out);
+  (void)fclose(input_temp);
   memset(buff, 0, BSZ + 16);
   free(buff);
   free(outb);
@@ -231,3 +297,4 @@ int main(int argc, char *argv[])
   memset(&ctx, 0, sizeof(struct aes_ctx));
   return 0;
 }
+

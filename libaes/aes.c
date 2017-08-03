@@ -319,15 +319,25 @@ int aes_init_iv(struct aes_ctx *pctx, u8 iv[/*16*/])
 
 void aes_enc_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
 {
+
+  u32 bytesEncrypted = 0;
+
   u32 i, j;
 
   for (i = 0; i < (length >> 4); i++, in += 16, out += 16)
   {
     for (j = 0; j < 16; j++)
+    {
       out[j] = in[j] ^ (pctx->accu)[j];
+      bytesEncrypted++;
+    }
     aes_enc_ecb(out, out, pctx);
     memmove(pctx->accu, out, 16);
   }
+
+  printf("end of aes_enc_cbc\n");
+  printf("length: %d\n", length);
+  printf("bytes encrypted: %d\n", bytesEncrypted);
 }
 
 void aes_dec_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
@@ -344,3 +354,4 @@ void aes_dec_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
     memcpy(pctx->accu, buff, 16);
   }
 }
+
