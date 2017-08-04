@@ -76,6 +76,7 @@ int main(int argc, char *argv[])
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00'};
+
   if (!buff || !outb)
   {
     perror("Running out of memory");
@@ -119,8 +120,10 @@ int main(int argc, char *argv[])
       usage(NULL);
     }
   }
-  if (get_key == 0)
-    usage("key not specified.");
+
+  // TODO:  TEMPORARILY in comment. Just for dev
+  // if (get_key == 0)
+    // usage("key not specified.");
 
   if (verbose == 1)
   {
@@ -150,50 +153,36 @@ int main(int argc, char *argv[])
     // TODO: create threads somewhere around here
 
     i = 0;
-    while ((size = (unsigned int)fread(buff + i, 1, (size_t)(BSZ - i), in)) != 0)
+    while ((size = (unsigned int)fread(buff, 1, (size_t)BSZ, in)) != 0)
     {
       if ((nsize != 0) && (i == 0))
       {
-        printf("1\n");
         (void)fwrite(outb, 1, BSZ, out);
       }
 
-      if ((i + size) != BSZ)
+      if (size != BSZ)
       {
-        printf("2\n");
         i = size;
       }
       else
       {
-        printf("3\n");
         aes_dec_cbc(outb, buff, BSZ, &ctx);
         i = 0;
       }
+
       nsize += size;
     }
 
-    printf("i: %d\n", i);
-
     if (i > 0)
-    {
-      printf("4\n");
       aes_dec_cbc(outb, buff, i, &ctx);
-    }
 
     if (i == 0)
-    {
-      printf("5\n");
       i = BSZ;
-    }
 
     // --- Remove PKCS7 padding ---
-    // determine padding length by reading last byte
-    padding_length = *(outb + i - 1);
+    padding_length = *(outb + i - 1); // determine padding length by reading last byte of buffer
 
-    printf("\nlast char: %d\n", padding_length);
-    printf("--last char (hex): %x\n", padding_length);
-
-    (void)fwrite(outb, 1, (size_t)i - padding_length, out);
+    (void)fwrite(outb, 1, (size_t)i - padding_length, out); // padding is removed because it is not written in the out file
 
     if (verbose == 1)
     {
@@ -202,12 +191,13 @@ int main(int argc, char *argv[])
   }
   else
   {
-    FILE *input_temp = fopen("input_temp.txt", "w");
-
     (void)aes_init_enc(&ctx, key_length, key);
+
     memset(outb + BSZ, 0, 16);
+
     if (!(rand = fopen("/dev/random", "r")))
       perror("Cannot get randomness");
+
     (void)fread(iv, 1, 16, rand);
     (void)fclose(rand);
 
@@ -219,67 +209,38 @@ int main(int argc, char *argv[])
     }
 
     (void)fwrite(iv, 1, 16, out);
-    (void)fwrite(iv, 1, 16, input_temp);
 
     (void)aes_init_iv(&ctx, iv);
 
     // TODO: create threads somewhere around here
 
     i = 0;
-    while ((size = (unsigned int)fread(buff + i, 1, (size_t)(BSZ - i), in)) != 0)
+    while ((size = (unsigned int)fread(buff, 1, (size_t)BSZ, in)) != 0)
     {
-      // TODO: maybe some refactoring here (is i needed?)
-      if ((i + size) != BSZ)
+      if (size != BSZ)
       {
         i = size;
-        printf("1\n");
       }
       else
       {
-        printf("2\n");
         aes_enc_cbc(outb, buff, BSZ, &ctx);
         i = 0;
       }
+
       nsize += size;
 
       if ((nsize != 0) && (i == 0))
       {
         (void)fwrite(outb, 1, BSZ, out);
-        (void)fwrite(buff, 1, BSZ, input_temp);
-        printf("3\n");
       }
     }
 
     // apply PKCS7 padding
     padding_length = 16 - (nsize % 16);
-    printf("padding_length: %d\n", padding_length);
     memset(buff + i, padding_length, padding_length);
 
-    if ((i % 16) != 0)
-    {
-      printf("4\n");
-
-      // padding_length = 16 - (i % 16);
-
-      // memset(buff + i, 0, 16);
-      // memset(buff + i, 0, padding_length);
-
-      // memset(buff + i, 0, padding_length);
-      // aes_enc_cbc(outb, buff, i + 16, &ctx);
-      aes_enc_cbc(outb, buff, i + padding_length, &ctx);
-
-      // (void)fwrite(outb, 1, (size_t)(i + 16), out);
-      (void)fwrite(outb, 1, (size_t)(i + padding_length), out);
-      (void)fwrite(buff, 1, (size_t)(i + padding_length), input_temp);
-    }
-    else
-    {
-      printf("5\n");
-      // TODO: these are the same. REFACTOR
-      aes_enc_cbc(outb, buff, i + padding_length, &ctx);
-      (void)fwrite(outb, 1, (size_t)(i + padding_length), out);
-      (void)fwrite(buff, 1, (size_t)(i + padding_length), input_temp);
-    }
+    aes_enc_cbc(outb, buff, i + padding_length, &ctx);
+    (void)fwrite(outb, 1, (size_t)(i + padding_length), out);
 
     if (verbose == 1)
     {
@@ -289,8 +250,8 @@ int main(int argc, char *argv[])
 
   (void)fclose(in);
   (void)fclose(out);
-  (void)fclose(input_temp);
   memset(buff, 0, BSZ + 16);
+  memset(outb, 0, BSZ + 32);
   free(buff);
   free(outb);
   memset(key, 0, 32);
