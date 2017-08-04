@@ -342,6 +342,8 @@ void aes_enc_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
 
 void aes_dec_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
 {
+  u32 bytesDencrypted = 0;
+
   u32 i, j;
   u8 buff[16]; /* if out == in */
 
@@ -353,5 +355,9 @@ void aes_dec_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
       out[j] ^= (pctx->accu)[j];
     memcpy(pctx->accu, buff, 16);
   }
+
+  printf("end of aes_dec_cbc\n");
+  printf("length: %d\n", length);
+  printf("bytes decrypted: %d\n", bytesDencrypted);
 }
 
