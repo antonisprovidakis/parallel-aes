@@ -70,8 +70,8 @@ int main(int argc, char *argv[])
   FILE *in = stdin, *out = stdout, *rand;
 
   struct aes_ctx ctx;
-  unsigned char iv[16];
-  unsigned char *buff = malloc(BSZ + 16), *outb = malloc(BSZ + 32);
+  unsigned char iv[AES_BLOCK_SIZE];
+  unsigned char *buff = malloc(BSZ + AES_BLOCK_SIZE), *outb = malloc(BSZ + 2 * AES_BLOCK_SIZE);
   unsigned char key[32] = {'\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
 
   if (decrypt_mode == 1)
   {
-    if (16 != fread(iv, 1, 16, in))
+    if (AES_BLOCK_SIZE != fread(iv, 1, AES_BLOCK_SIZE, in))
     {
       fprintf(stderr, "Invalid input file format.\n");
       exit(0);
@@ -144,7 +144,7 @@ int main(int argc, char *argv[])
     if (verbose == 1)
     {
       fprintf(stderr, "Initial vector = ");
-      printHex(iv, 16 * 8);
+      printHex(iv, AES_BLOCK_SIZE * 8);
       fprintf(stderr, "\n");
     }
 
@@ -193,22 +193,22 @@ int main(int argc, char *argv[])
   {
     (void)aes_init_enc(&ctx, key_length, key);
 
-    memset(outb + BSZ, 0, 16);
+    memset(outb + BSZ, 0, AES_BLOCK_SIZE);
 
     if (!(rand = fopen("/dev/random", "r")))
       perror("Cannot get randomness");
 
-    (void)fread(iv, 1, 16, rand);
+    (void)fread(iv, 1, AES_BLOCK_SIZE, rand);
     (void)fclose(rand);
 
     if (verbose == 1)
     {
       fprintf(stderr, "Initial vector = ");
-      printHex(iv, 16 * 8);
+      printHex(iv, AES_BLOCK_SIZE * 8);
       fprintf(stderr, "\n");
     }
 
-    (void)fwrite(iv, 1, 16, out);
+    (void)fwrite(iv, 1, AES_BLOCK_SIZE, out);
 
     (void)aes_init_iv(&ctx, iv);
 
@@ -236,7 +236,7 @@ int main(int argc, char *argv[])
     }
 
     // apply PKCS7 padding
-    padding_length = 16 - (nsize % 16);
+    padding_length = AES_BLOCK_SIZE - (nsize % AES_BLOCK_SIZE);
     memset(buff + i, padding_length, padding_length);
 
     aes_enc_cbc(outb, buff, i + padding_length, &ctx);
@@ -250,8 +250,8 @@ int main(int argc, char *argv[])
 
   (void)fclose(in);
   (void)fclose(out);
-  memset(buff, 0, BSZ + 16);
-  memset(outb, 0, BSZ + 32);
+  memset(buff, 0, BSZ + AES_BLOCK_SIZE);
+  memset(outb, 0, BSZ + 2 * AES_BLOCK_SIZE);
   free(buff);
   free(outb);
   memset(key, 0, 32);

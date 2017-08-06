@@ -25,12 +25,13 @@
 
 #define AES_OK 0
 #define AES_BAD_KEY_SIZE (-1)
+#define AES_BLOCK_SIZE 16
 
 struct aes_ctx {
   unsigned int n_rounds;
   unsigned int key_size;
   unsigned int rk[60];
-  unsigned char accu[16];
+  unsigned char accu[AES_BLOCK_SIZE];
 };
 
 int aes_init_enc (/*@out@*/ struct aes_ctx * pctx, unsigned int key_size, unsigned char * key);
