@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "aescrypt.h": "c",
+        "stdio.h": "c",
+        "cstdio": "c",
+        "stdlib.h": "c",
+        "cstdlib": "c"
+    }
+}
