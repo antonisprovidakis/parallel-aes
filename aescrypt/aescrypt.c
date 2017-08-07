@@ -19,12 +19,14 @@
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  
  */
-#include <unistd.h>
-#include <sys/stat.h>
-// #include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
+// #include <sys/types.h>
+// #include <sys/times.h>
+#include <dirent.h>
 #include <ctype.h>
 #include <pthread.h>
 
@@ -36,7 +38,6 @@ unsigned int verbose = 0;
 
 unsigned int counter = 0;
 unsigned int PART_SIZE = 2097152; // 2M
-pthread_mutex_t mutex;
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 
@@ -71,8 +72,11 @@ static void printHex(unsigned char *k, unsigned int kl)
   }
 }
 
-struct thread_data
+// Queue staff
+struct job
 {
+  struct job *j_prev;
+
   char *in_file_name;
   unsigned char *key;
   unsigned int *key_length;
@@ -85,7 +89,124 @@ struct thread_data
   // pthread_t thread_id;
 };
 
-void aes_encrypt_part(void *thread_data)
+struct queue
+{
+  unsigned int size;
+  struct job *q_head;
+  struct job *q_tail;
+  pthread_rwlock_t q_lock;
+};
+
+/*
+* Initialize a queue.
+*/
+int queue_init(struct queue *qp)
+{
+  int err;
+
+  qp->size = 0;
+  qp->q_head = NULL;
+  qp->q_tail = NULL;
+
+  err = pthread_rwlock_init(&qp->q_lock, NULL);
+
+  if (err != 0)
+    return (err);
+  /* ... continue initialization ... */
+  return (0);
+}
+
+/*
+* Destroy a queue.
+*/
+void queue_destroy(struct queue *qp)
+{
+  struct job *job;
+
+  while (!is_empty(qp))
+  {
+    job = job_dequeue(qp);
+    free(job);
+  }
+  free(qp);
+}
+
+/*
+* Insert a job at the head of the queue.
+*/
+void job_enqueue(struct queue *qp, struct job *jp)
+{
+  if ((qp == NULL) || (jp == NULL))
+  {
+    return 0;
+  }
+
+  pthread_rwlock_wrlock(&qp->q_lock);
+
+  jp->j_next = NULL;
+
+  if (qp->size == 0)
+  {
+    qp->q_head = jp;
+    qp->q_tail = jp;
+  }
+  else
+  {
+    // adding item to the end of the queue
+    qp->q_tail->j_prev = jp;
+    qp->q_tail = jp;
+  }
+
+  qp->size++;
+
+  pthread_rwlock_unlock(&qp->q_lock);
+}
+
+/*
+* Remove the given job from a queue.
+*/
+void job_dequeue(struct queue *qp)
+{
+  struct job *job;
+
+  pthread_rwlock_wrdlock(&qp->q_lock);
+  if (is_empty(qp))
+  {
+    pthread_rwlock_unlock(&qp->q_lock);
+    return NULL;
+  }
+
+  pthread_rwlock_wrlock(&qp->q_lock);
+
+  job = qp->q_head;
+  qp->q_head = (qp->q_head)->j_prev;
+  qp->size--;
+
+  pthread_rwlock_unlock(&qp->q_lock);
+
+  return job;
+}
+
+int is_empty(struct queue *qp)
+{
+  if (qp == NULL)
+  {
+    return 0;
+  }
+
+  if (qp->size == 0)
+  {
+    return 1;
+  }
+  else
+  {
+    return 0;
+  }
+}
+
+// end of queue staff
+
+void aes_encrypt_part(void *job)
 {
   // TODO: copy-paste code from encrypt block
   unsigned int i, size, nsize = 0;
@@ -96,7 +217,7 @@ void aes_encrypt_part(void *thread_data)
   // TODO: maybe remove outb? make encryption/decryption in place in order to save memory
   FILE *in, *out, *rand;
 
-  struct thread_data *data = (struct thread_data *)thread_data;
+  struct job *data = (struct job *)job;
 
   if (!buff || !outb)
   {
@@ -120,7 +241,7 @@ void aes_encrypt_part(void *thread_data)
   (void)fread(iv, 1, AES_BLOCK_SIZE, rand);
   (void)fclose(rand);
 
-  (void)aes_init_enc(&(data->ctx), *(data->key_length), data->key);
+  (void)aes_init_enc(&data->ctx, *(data->key_length), data->key);
 
   memset(outb + BSZ, 0, AES_BLOCK_SIZE);
 
@@ -134,7 +255,7 @@ void aes_encrypt_part(void *thread_data)
 
   (void)fwrite(iv, 1, AES_BLOCK_SIZE, out);
 
-  (void)aes_init_iv(&(data->ctx), iv);
+  (void)aes_init_iv(&data->ctx, iv);
 
   i = 0;
   while ((size = (unsigned int)fread(buff, 1, (size_t)BSZ, in)) != 0)
@@ -145,7 +266,7 @@ void aes_encrypt_part(void *thread_data)
     }
     else
     {
-      aes_enc_cbc(outb, buff, BSZ, &(data->ctx));
+      aes_enc_cbc(outb, buff, BSZ, &data->ctx);
       i = 0;
     }
 
@@ -161,7 +282,7 @@ void aes_encrypt_part(void *thread_data)
   padding_length = AES_BLOCK_SIZE - (nsize % AES_BLOCK_SIZE);
   memset(buff + i, padding_length, padding_length);
 
-  aes_enc_cbc(outb, buff, i + padding_length, &(data->ctx));
+  aes_enc_cbc(outb, buff, i + padding_length, &data->ctx);
   (void)fwrite(outb, 1, (size_t)(i + padding_length), out);
 
   if (verbose == 1)
@@ -177,16 +298,19 @@ void aes_encrypt_part(void *thread_data)
   free(buff);
   free(outb);
   // memset(key, 0, 32);
-  memset(&(data->ctx), 0, sizeof(struct aes_ctx));
+  memset(&data->ctx, 0, sizeof(struct aes_ctx));
+
+  pthread_exit(NULL);
 }
 
-// void aes_decrypt_part(void *thread_data)
+// void aes_decrypt_part(void *job)
 // {
 //    // TODO: copy-paste code from decrypt block
 // }
 
 int main(int argc, char *argv[])
 {
+  pthread_t *threads;
 
   int opt;
   unsigned int key_length = 128;
@@ -194,6 +318,10 @@ int main(int argc, char *argv[])
   unsigned int get_key = 0, decrypt_mode = 0, i;
   FILE *in = stdin;
   char *in_file_name;
+
+  DIR *dp;
+  struct dirent *ep = NULL;
+
   // FILE *out = stdout, *rand;
 
   // struct aes_ctx ctx;
@@ -276,6 +404,8 @@ int main(int argc, char *argv[])
   // if (get_key == 0)
   // usage("key not specified.");
 
+  threads = malloc(sizeof(pthread_t) * num_of_threads);
+
   if (verbose == 1)
   {
     fprintf(stderr, "Working with key ");
@@ -285,8 +415,6 @@ int main(int argc, char *argv[])
 
   system("rm -rf temp");
   system("rm -rf enc");
-
-  pthread_mutex_init(&mutex, NULL);
 
   if (decrypt_mode == 1)
   {
@@ -373,10 +501,28 @@ int main(int argc, char *argv[])
     (void)fclose(in);
 
     // open dir
-    // for file in files
-    // while counter < 8
-    // create thread_data instance
-    // create a thread
+    if ((dp = opendir("./temp")) != NULL)
+    {
+      // for file in files
+      int j = 0;
+      while ((ep = readdir(dp)) != NULL)
+      {
+        // TODO: change this
+        // while (counter >= 8)
+        // {
+        // }
+
+        // counter++
+        // create job
+        instance
+        // create a thread
+
+        //strcpy(&filename[j], ep->d_name); //copy all files of temp directory
+      }
+      (void)closedir(dp);
+    }
+    else
+      perror("Couldn't open the directory");
 
     /*
     (void)aes_init_enc(&ctx, key_length, key);
