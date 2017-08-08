@@ -72,11 +72,8 @@ static void printHex(unsigned char *k, unsigned int kl)
   }
 }
 
-// Queue staff
 struct job
 {
-  struct job *j_prev;
-
   char *in_file_name;
   unsigned char *key;
   unsigned int *key_length;
@@ -89,11 +86,18 @@ struct job
   // pthread_t thread_id;
 };
 
+//////// Queue staff
+struct q_node
+{
+  struct job;
+  struct job *j_prev;
+}
+
 struct queue
 {
   unsigned int size;
-  struct job *q_head;
-  struct job *q_tail;
+  struct q_node *q_head;
+  struct q_node *q_tail;
   pthread_rwlock_t q_lock;
 };
 
@@ -121,40 +125,41 @@ int queue_init(struct queue *qp)
 */
 void queue_destroy(struct queue *qp)
 {
-  struct job *job;
+  struct q_node *node;
 
-  while (!is_empty(qp))
+  while (!queue_is_empty(qp))
   {
-    job = job_dequeue(qp);
-    free(job);
+    node = node_dequeue(qp);
+    free(node);
   }
+
   free(qp);
 }
 
 /*
 * Insert a job at the head of the queue.
 */
-void job_enqueue(struct queue *qp, struct job *jp)
+void node_enqueue(struct queue *qp, struct q_node *node)
 {
-  if ((qp == NULL) || (jp == NULL))
+  if ((qp == NULL) || (node == NULL))
   {
     return 0;
   }
 
   pthread_rwlock_wrlock(&qp->q_lock);
 
-  jp->j_next = NULL;
+  node->j_next = NULL;
 
   if (qp->size == 0)
   {
-    qp->q_head = jp;
-    qp->q_tail = jp;
+    qp->q_head = node;
+    qp->q_tail = node;
   }
   else
   {
     // adding item to the end of the queue
-    qp->q_tail->j_prev = jp;
-    qp->q_tail = jp;
+    qp->q_tail->j_prev = node;
+    qp->q_tail = node;
   }
 
   qp->size++;
@@ -165,12 +170,12 @@ void job_enqueue(struct queue *qp, struct job *jp)
 /*
 * Remove the given job from a queue.
 */
-void job_dequeue(struct queue *qp)
+struct q_node node_dequeue(struct queue *qp)
 {
-  struct job *job;
+  struct q_node *node;
 
   pthread_rwlock_wrdlock(&qp->q_lock);
-  if (is_empty(qp))
+  if (queue_is_empty(qp))
   {
     pthread_rwlock_unlock(&qp->q_lock);
     return NULL;
@@ -178,16 +183,16 @@ void job_dequeue(struct queue *qp)
 
   pthread_rwlock_wrlock(&qp->q_lock);
 
-  job = qp->q_head;
+  node = qp->q_head;
   qp->q_head = (qp->q_head)->j_prev;
   qp->size--;
 
   pthread_rwlock_unlock(&qp->q_lock);
 
-  return job;
+  return node;
 }
 
-int is_empty(struct queue *qp)
+int queue_is_empty(struct queue *qp)
 {
   if (qp == NULL)
   {
@@ -203,10 +208,9 @@ int is_empty(struct queue *qp)
     return 0;
   }
 }
+///////////// end of queue staff
 
-// end of queue staff
-
-void aes_encrypt_part(void *job)
+void aes_encrypt_part(void *data)
 {
   // TODO: copy-paste code from encrypt block
   unsigned int i, size, nsize = 0;
@@ -217,7 +221,7 @@ void aes_encrypt_part(void *job)
   // TODO: maybe remove outb? make encryption/decryption in place in order to save memory
   FILE *in, *out, *rand;
 
-  struct job *data = (struct job *)job;
+  struct job *job = (struct * job) data;
 
   if (!buff || !outb)
   {
@@ -241,7 +245,7 @@ void aes_encrypt_part(void *job)
   (void)fread(iv, 1, AES_BLOCK_SIZE, rand);
   (void)fclose(rand);
 
-  (void)aes_init_enc(&data->ctx, *(data->key_length), data->key);
+  (void)aes_init_enc(&job->ctx, *(job->key_length), job->key);
 
   memset(outb + BSZ, 0, AES_BLOCK_SIZE);
 
@@ -255,7 +259,7 @@ void aes_encrypt_part(void *job)
 
   (void)fwrite(iv, 1, AES_BLOCK_SIZE, out);
 
-  (void)aes_init_iv(&data->ctx, iv);
+  (void)aes_init_iv(&job->ctx, iv);
 
   i = 0;
   while ((size = (unsigned int)fread(buff, 1, (size_t)BSZ, in)) != 0)
