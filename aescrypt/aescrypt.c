@@ -24,20 +24,21 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
-// #include <sys/types.h>
-// #include <sys/times.h>
 #include <dirent.h>
 #include <ctype.h>
 #include <pthread.h>
-
+#include <time.h>
 #include <aes.h>
+
+#define TEMP_FOLDER "temp"
+#define ENC_FOLDER "enc"
 
 #define BSZ 2048
 
 unsigned int verbose = 0;
 
 unsigned int counter = 0;
-unsigned int PART_SIZE = 2097152; // 2M
+unsigned int PART_SIZE = 2097152; // Default, 2M
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 
@@ -74,24 +75,22 @@ static void printHex(unsigned char *k, unsigned int kl)
 
 struct job
 {
-  char *in_file_name;
+  unsigned int id;
+  unsigned char *iv;
+  char in_file_name[256];
+  char out_file_name[256];
   unsigned char *key;
   unsigned int *key_length;
   struct aes_ctx ctx;
-  unsigned char iv[AES_BLOCK_SIZE];
-
-  // char pthread_inputFile[100];
-  // char pthread_outputFile[100];
-  // char pthread_keyString[128];
-  // pthread_t thread_id;
 };
 
 //////// Queue staff
+
 struct q_node
 {
-  struct job;
-  struct job *j_prev;
-}
+  struct job job;
+  struct q_node *q_prev;
+};
 
 struct queue
 {
@@ -100,6 +99,12 @@ struct queue
   struct q_node *q_tail;
   pthread_rwlock_t q_lock;
 };
+
+int queue_init(struct queue *);
+void queue_destroy(struct queue *);
+int node_enqueue(struct queue *, struct q_node *);
+struct q_node *node_dequeue(struct queue *);
+int queue_is_empty(struct queue *);
 
 /*
 * Initialize a queue.
@@ -139,7 +144,7 @@ void queue_destroy(struct queue *qp)
 /*
 * Insert a job at the head of the queue.
 */
-void node_enqueue(struct queue *qp, struct q_node *node)
+int node_enqueue(struct queue *qp, struct q_node *node)
 {
   if ((qp == NULL) || (node == NULL))
   {
@@ -148,43 +153,40 @@ void node_enqueue(struct queue *qp, struct q_node *node)
 
   pthread_rwlock_wrlock(&qp->q_lock);
 
-  node->j_next = NULL;
+  node->q_prev = NULL;
 
   if (qp->size == 0)
-  {
     qp->q_head = node;
-    qp->q_tail = node;
-  }
   else
-  {
-    // adding item to the end of the queue
-    qp->q_tail->j_prev = node;
-    qp->q_tail = node;
-  }
+    qp->q_tail->q_prev = node; // adding item to the end of the queue
+
+  qp->q_tail = node;
 
   qp->size++;
 
   pthread_rwlock_unlock(&qp->q_lock);
+
+  return 1;
 }
 
 /*
 * Remove the given job from a queue.
 */
-struct q_node node_dequeue(struct queue *qp)
+struct q_node *node_dequeue(struct queue *qp)
 {
   struct q_node *node;
 
-  pthread_rwlock_wrdlock(&qp->q_lock);
   if (queue_is_empty(qp))
   {
-    pthread_rwlock_unlock(&qp->q_lock);
     return NULL;
   }
 
   pthread_rwlock_wrlock(&qp->q_lock);
 
   node = qp->q_head;
-  qp->q_head = (qp->q_head)->j_prev;
+  qp->q_head = (qp->q_head)->q_prev;
+  node->q_prev = NULL;
+
   qp->size--;
 
   pthread_rwlock_unlock(&qp->q_lock);
@@ -194,83 +196,74 @@ struct q_node node_dequeue(struct queue *qp)
 
 int queue_is_empty(struct queue *qp)
 {
+  int empty = 0;
+
   if (qp == NULL)
   {
     return 0;
   }
 
-  if (qp->size == 0)
-  {
-    return 1;
-  }
-  else
-  {
-    return 0;
-  }
+  pthread_rwlock_rdlock(&qp->q_lock);
+
+  empty = qp->size == 0;
+
+  pthread_rwlock_unlock(&qp->q_lock);
+
+  return empty;
 }
 ///////////// end of queue staff
 
-void aes_encrypt_part(void *data)
+int aes_encrypt_part(unsigned char *iv, char *in_file_name, char *out_file_name, unsigned char *key, unsigned int *key_length, struct aes_ctx *ctx)
 {
-  // TODO: copy-paste code from encrypt block
+  // printf("aes_encrypt_part START, in thread: %lu\n", (unsigned long)pthread_self());
+
   unsigned int i, size, nsize = 0;
   unsigned int padding_length = 0;
-  unsigned char iv[AES_BLOCK_SIZE];
   unsigned char *buff = malloc(BSZ + AES_BLOCK_SIZE), *outb = malloc(BSZ + 2 * AES_BLOCK_SIZE);
-
   // TODO: maybe remove outb? make encryption/decryption in place in order to save memory
-  FILE *in, *out, *rand;
 
-  struct job *job = (struct * job) data;
+  FILE *in, *out;
 
   if (!buff || !outb)
   {
-    // TODO: modify to print thread id
-    perror("Running out of memory from thread: ");
-    // exit(EXIT_FAILURE);
-    pthread_exit(NULL);
+    fprintf(stderr, "Running out of memory from thread: %lu\n", (unsigned long)pthread_self());
+    // perror("Running out of memory from thread: %lu\n", (unsigned long)pthread_self());
+    return 0; // fail
   }
 
-  if (!(in = fopen(optarg, "r")))
+  if (!(in = fopen(in_file_name, "r")))
+  {
     // usage("cannot open input file for reading.");
-    pthread_exit(NULL);
+    fprintf(stderr, "cannot open input file for reading. from thread: %lu\n", (unsigned long)pthread_self());
+    return 0;
+  }
 
-  if (!(out = fopen(optarg, "w")))
+  if (!(out = fopen(out_file_name, "w")))
+  {
     // usage("cannot open output file for writing.");
-    pthread_exit(NULL);
+    fprintf(stderr, "cannot open output file for writing. from thread: %lu\n", (unsigned long)pthread_self());
+    return 0;
+  }
 
-  if (!(rand = fopen("/dev/random", "r")))
-    perror("Cannot get randomness");
-
-  (void)fread(iv, 1, AES_BLOCK_SIZE, rand);
-  (void)fclose(rand);
-
-  (void)aes_init_enc(&job->ctx, *(job->key_length), job->key);
+  (void)aes_init_enc(ctx, *key_length, key);
 
   memset(outb + BSZ, 0, AES_BLOCK_SIZE);
 
-  if (verbose == 1)
-  {
-    // TODO: modify to print thread id
-    fprintf(stderr, "Initial vector = ");
-    printHex(iv, AES_BLOCK_SIZE * 8);
-    fprintf(stderr, "\n");
-  }
-
   (void)fwrite(iv, 1, AES_BLOCK_SIZE, out);
 
-  (void)aes_init_iv(&job->ctx, iv);
+  (void)aes_init_iv(ctx, iv);
 
   i = 0;
   while ((size = (unsigned int)fread(buff, 1, (size_t)BSZ, in)) != 0)
   {
+
     if (size != BSZ)
     {
       i = size;
     }
     else
     {
-      aes_enc_cbc(outb, buff, BSZ, &data->ctx);
+      aes_enc_cbc(outb, buff, BSZ, ctx);
       i = 0;
     }
 
@@ -286,13 +279,12 @@ void aes_encrypt_part(void *data)
   padding_length = AES_BLOCK_SIZE - (nsize % AES_BLOCK_SIZE);
   memset(buff + i, padding_length, padding_length);
 
-  aes_enc_cbc(outb, buff, i + padding_length, &data->ctx);
+  aes_enc_cbc(outb, buff, i + padding_length, ctx);
   (void)fwrite(outb, 1, (size_t)(i + padding_length), out);
 
   if (verbose == 1)
   {
-    // TODO: modify to print thread id
-    fprintf(stderr, " -> %u kilobytes processed.\n", nsize >> 10);
+    fprintf(stderr, " -> %u kilobytes processed in thread: %lu\n", nsize >> 10, (unsigned long)pthread_self());
   }
 
   (void)fclose(in);
@@ -301,47 +293,66 @@ void aes_encrypt_part(void *data)
   memset(outb, 0, BSZ + 2 * AES_BLOCK_SIZE);
   free(buff);
   free(outb);
-  // memset(key, 0, 32);
-  memset(&data->ctx, 0, sizeof(struct aes_ctx));
+  memset(ctx, 0, sizeof(struct aes_ctx));
+
+  // printf("aes_encrypt_part END, in thread: %lu\n", (unsigned long)pthread_self());
+
+  return 1; // success
+}
+
+void *aes_encrypt_thread_func_wrapper(void *q)
+{
+  // printf("aes_encrypt_thread_func_wrapper START, in thread: %lu\n", (unsigned long)pthread_self());
+
+  struct queue *jobs_queue = (struct queue *)q;
+  struct q_node *node;
+  struct job *job;
+
+  while (!queue_is_empty(jobs_queue))
+  {
+    node = node_dequeue(jobs_queue);
+    job = &node->job;
+
+    if (aes_encrypt_part(job->iv, job->in_file_name, job->out_file_name, job->key, job->key_length, &job->ctx))
+    {
+      // printf("ENCRYPTION was successful, in thread: %lu\n", (unsigned long)pthread_self());
+      free(node);
+    }
+    else
+    {
+      // if something goes wrong, put node back to queue
+      fprintf(stderr, " -> something went wrong in aes_encrypt_part, in thread: %lu\n", (unsigned long)pthread_self());
+      node_enqueue(jobs_queue, node);
+    }
+  }
+
+  // printf("QUEUE is EMPTY, in thread: %lu\n", (unsigned long)pthread_self());
+  // printf("aes_encrypt_thread_func_wrapper END, in thread: %lu\n", (unsigned long)pthread_self());
 
   pthread_exit(NULL);
 }
 
-// void aes_decrypt_part(void *job)
-// {
-//    // TODO: copy-paste code from decrypt block
-// }
-
 int main(int argc, char *argv[])
 {
+  clock_t start, end;
+  double cpu_time_used;
   pthread_t *threads;
-
+  char *in_file_name;
+  char str_buff[512] = "";
+  struct queue *jobs_queue;
   int opt;
   unsigned int key_length = 128;
   unsigned int num_of_threads = 1;
   unsigned int get_key = 0, decrypt_mode = 0, i;
-  FILE *in = stdin;
-  char *in_file_name;
-
+  FILE *in = stdin, *rand;
   DIR *dp;
   struct dirent *ep = NULL;
 
-  // FILE *out = stdout, *rand;
-
-  // struct aes_ctx ctx;
-  // unsigned char iv[AES_BLOCK_SIZE];
-  // unsigned char *buff = malloc(BSZ + AES_BLOCK_SIZE), *outb = malloc(BSZ + 2 * AES_BLOCK_SIZE);
+  unsigned char iv[AES_BLOCK_SIZE];
   unsigned char key[32] = {'\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00'};
-  // unsigned int padding_length = 0;
-
-  // if (!buff || !outb)
-  // {
-  //   perror("Running out of memory");
-  //   exit(EXIT_FAILURE);
-  // }
 
   // while ((opt = getopt(argc, argv, "dm:i:o:k:t:hv")) != -1)
   while ((opt = getopt(argc, argv, "dm:i:k:t:p:hv")) != -1)
@@ -359,7 +370,7 @@ int main(int argc, char *argv[])
       if (!(in = fopen(optarg, "r")))
         usage("cannot open input file for reading.");
 
-      in_file_name = (char *)malloc((strlen(optarg) + 1) * sizeof(char));
+      in_file_name = malloc((strlen(optarg) + 1) * sizeof(char));
 
       if (in_file_name == NULL)
         usage("Not enough memory to keep file name in var");
@@ -389,11 +400,18 @@ int main(int argc, char *argv[])
       printf("Num of threads is: %d\n", num_of_threads);
       break;
     case 'p':
-      PART_SIZE = (unsigned int)atoi(optarg);
-
-      if (!isdigit(PART_SIZE) && PART_SIZE < 1)
+      // TODO: problem here. TEST
+      // printf("test1\n");
+      PART_SIZE = (unsigned int)strtoul(optarg, NULL, 10);
+      // printf("PART_SIZE: %d\n", PART_SIZE);
+      
+      if (PART_SIZE < 1)
+      {
+        // printf("test3\n");
         usage("part size parameter is not valid. Use a positive integer.\n");
-
+      }
+      // printf("test4\n");
+      // usage(NULL);
       break;
     case 'v':
       verbose = 1;
@@ -410,6 +428,19 @@ int main(int argc, char *argv[])
 
   threads = malloc(sizeof(pthread_t) * num_of_threads);
 
+  jobs_queue = malloc(sizeof(struct queue));
+  if (jobs_queue == NULL)
+  {
+    perror("Couldn't create jobs_queue. Not enough memory!");
+    exit(EXIT_FAILURE);
+  }
+
+  if (queue_init(jobs_queue) != 0)
+  {
+    perror("Error in queue init");
+    exit(EXIT_FAILURE);
+  }
+
   if (verbose == 1)
   {
     fprintf(stderr, "Working with key ");
@@ -417,181 +448,134 @@ int main(int argc, char *argv[])
     fprintf(stderr, "\n");
   }
 
-  system("rm -rf temp");
-  system("rm -rf enc");
-
   if (decrypt_mode == 1)
   {
-    printf("DECRYPT CODE BLOCK");
-    /*
-    if (AES_BLOCK_SIZE != fread(iv, 1, AES_BLOCK_SIZE, in))
-    {
-      fprintf(stderr, "Invalid input file format.\n");
-      exit(0);
-    }
-    (void)aes_init_dec(&ctx, key_length, key);
-
-    if (verbose == 1)
-    {
-      fprintf(stderr, "Initial vector = ");
-      printHex(iv, AES_BLOCK_SIZE * 8);
-      fprintf(stderr, "\n");
-    }
-
-    (void)aes_init_iv(&ctx, iv);
-
-    // TODO: create threads somewhere around here
-
-    i = 0;
-    while ((size = (unsigned int)fread(buff, 1, (size_t)BSZ, in)) != 0)
-    {
-      if ((nsize != 0) && (i == 0))
-      {
-        (void)fwrite(outb, 1, BSZ, out);
-      }
-
-      if (size != BSZ)
-      {
-        i = size;
-      }
-      else
-      {
-        aes_dec_cbc(outb, buff, BSZ, &ctx);
-        i = 0;
-      }
-
-      nsize += size;
-    }
-
-    if (i > 0)
-      aes_dec_cbc(outb, buff, i, &ctx);
-
-    if (i == 0)
-      i = BSZ;
-
-    // --- Remove PKCS7 padding ---
-    padding_length = *(outb + i - 1); // determine padding length by reading last byte of buffer
-
-    (void)fwrite(outb, 1, (size_t)i - padding_length, out); // padding is removed because it is not written in the out file
-
-    if (verbose == 1)
-    {
-      fprintf(stderr, " -> %u kilobytes processed.\n", nsize >> 10);
-    }
-    */
+    printf("DECRYPT CODE BLOCK - NOT IMPLEMENTED YET");
   }
   else
   {
-    // TODO: create threads somewhere around here
+    snprintf(str_buff, sizeof(str_buff), "rm -rf %s", TEMP_FOLDER);
+    system(str_buff);
+    snprintf(str_buff, sizeof(str_buff), "rm -rf %s", ENC_FOLDER);
+    system(str_buff);
 
-    // TODO: implement
-
-    if ((mkdir("./temp", 00777)) == -1)
+    snprintf(str_buff, sizeof(str_buff), "./%s", TEMP_FOLDER);
+    if ((mkdir(str_buff, 00777)) == -1)
     { // temp/ - splitted files are saved here
       fprintf(stdout, "error in creating dir. Maybe allready exists.\n");
     }
 
-    if ((mkdir("./enc", 0777)) == -1)
+    snprintf(str_buff, sizeof(str_buff), "./%s", ENC_FOLDER);
+
+    if ((mkdir(str_buff, 0777)) == -1)
     { // enc/ - encrypted files are saved here
       fprintf(stdout, "error in creating dir enc. Maybe allready exists.\n");
     }
 
-    char split_cmd[512] = "";
-    snprintf(split_cmd, 512, "split -b %d -a 5 %s temp/%s.part_", PART_SIZE, in_file_name, in_file_name);
-    printf("cmd = %s\n", split_cmd);
-    system(split_cmd); // run split command
+    snprintf(str_buff, sizeof(str_buff), "split -b %d -a 5 %s temp/%s.part_", PART_SIZE, in_file_name, in_file_name);
+    printf("cmd = %s\n", str_buff);
+    system(str_buff); // run split command
 
     free(in_file_name);
     (void)fclose(in);
 
-    // open dir
-    if ((dp = opendir("./temp")) != NULL)
+    /*
+      Use "urandom" instead of "random",
+      because the latter blocks until entropy is achieved
+      Maybe change after implementation is finished
+    */
+    if (!(rand = fopen("/dev/urandom", "r")))
+      perror("Cannot get randomness");
+
+    (void)fread(iv, 1, AES_BLOCK_SIZE, rand);
+
+    if (verbose == 1)
     {
-      // for file in files
-      int j = 0;
+      fprintf(stderr, "Initial vector\n");
+      printHex(iv, AES_BLOCK_SIZE * 8);
+      fprintf(stderr, "\n");
+    }
+
+    (void)fclose(rand);
+
+    // open dir
+    if ((dp = opendir(TEMP_FOLDER)) != NULL)
+    {
+      unsigned int job_count = 0;
+      struct q_node *node;
+
       while ((ep = readdir(dp)) != NULL)
       {
-        // TODO: change this
-        // while (counter >= 8)
-        // {
-        // }
+        if (!strcmp(ep->d_name, ".") || !strcmp(ep->d_name, ".."))
+          continue;
 
-        // counter++
-        // create job
-        instance
-        // create a thread
+        node = malloc(sizeof(struct q_node));
 
-        //strcpy(&filename[j], ep->d_name); //copy all files of temp directory
+        if (node != NULL)
+        {
+          node->job.id = job_count;
+          node->job.iv = iv;
+          snprintf(node->job.in_file_name, sizeof(node->job.in_file_name), "./%s/%s", TEMP_FOLDER, ep->d_name);
+          snprintf(node->job.out_file_name, sizeof(node->job.out_file_name), "./%s/%s.aes", ENC_FOLDER, ep->d_name);
+          node->job.key = key;
+          node->job.key_length = &key_length;
+
+          node_enqueue(jobs_queue, node);
+
+          job_count++;
+        }
       }
+
       (void)closedir(dp);
     }
     else
       perror("Couldn't open the directory");
 
-    /*
-    (void)aes_init_enc(&ctx, key_length, key);
+    // printf("Size of Queue: %d\n\n", jobs_queue->size);
 
-    memset(outb + BSZ, 0, AES_BLOCK_SIZE);
+    // struct q_node *n = NULL;
 
-    if (!(rand = fopen("/dev/random", "r")))
-      perror("Cannot get randomness");
+    // while (!queue_is_empty(jobs_queue))
+    // {
+    // n = node_dequeue(jobs_queue);
+    // struct job j = n->job;
 
-    (void)fread(iv, 1, AES_BLOCK_SIZE, rand);
-    (void)fclose(rand);
+    // printf("Job_ID: %d\nIn File Name: %s\nOut File Name: %s\nKey Length: %u\n", j.id, j.in_file_name, j.out_file_name, *(j.key_length));
+    // printf("Key: \n");
+    // printHex(j.key, *(j.key_length));
+    // printf("iv: \n");
+    // printHex(j.iv, AES_BLOCK_SIZE * 8);
 
-    if (verbose == 1)
+    // printf("\n\n");
+    // }
+
+    start = clock();
+
+    for (i = 0; i < num_of_threads && !queue_is_empty(jobs_queue); i++)
     {
-      fprintf(stderr, "Initial vector = ");
-      printHex(iv, AES_BLOCK_SIZE * 8);
-      fprintf(stderr, "\n");
+      pthread_create(&threads[i], NULL, aes_encrypt_thread_func_wrapper, (void *)jobs_queue);
+      // printf("Create thread: %d\n", i);
     }
 
-    (void)fwrite(iv, 1, AES_BLOCK_SIZE, out);
+    int t = 0;
 
-    (void)aes_init_iv(&ctx, iv);
-
-    i = 0;
-    while ((size = (unsigned int)fread(buff, 1, (size_t)BSZ, in)) != 0)
+    for (t = 0; t < i; t++)
     {
-      if (size != BSZ)
-      {
-        i = size;
-      }
-      else
-      {
-        aes_enc_cbc(outb, buff, BSZ, &ctx);
-        i = 0;
-      }
-
-      nsize += size;
-
-      if ((nsize != 0) && (i == 0))
-      {
-        (void)fwrite(outb, 1, BSZ, out);
-      }
+      (void)pthread_join(threads[t], NULL);
+      // printf("waiting thread with id %lu\n", threads[t]);
     }
 
-    // apply PKCS7 padding
-    padding_length = AES_BLOCK_SIZE - (nsize % AES_BLOCK_SIZE);
-    memset(buff + i, padding_length, padding_length);
-
-    aes_enc_cbc(outb, buff, i + padding_length, &ctx);
-    (void)fwrite(outb, 1, (size_t)(i + padding_length), out);
-
-    if (verbose == 1)
-    {
-      fprintf(stderr, " -> %u kilobytes processed.\n", nsize >> 10);
-    }
-  */
+    end = clock();
+    cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
+    printf("time for parallel part: %f\n\n", cpu_time_used);
   }
 
-  // (void)fclose(out);
-  // memset(buff, 0, BSZ + AES_BLOCK_SIZE);
-  // memset(outb, 0, BSZ + 2 * AES_BLOCK_SIZE);
-  // free(buff);
-  // free(outb);
-  // memset(&ctx, 0, sizeof(struct aes_ctx));
+  printf("just before clean and exit main\n\n");
 
+  memset(iv, 0, AES_BLOCK_SIZE);
   memset(key, 0, 32);
+  queue_destroy(jobs_queue);
+  free(threads);
+
   return 0;
 }

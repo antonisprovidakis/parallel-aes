@@ -22,6 +22,7 @@
  
 */
 
+#include <stdio.h>
 #include "aes.h"
 #include "tables.h"
 
@@ -335,9 +336,9 @@ void aes_enc_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
     memmove(pctx->accu, out, AES_BLOCK_SIZE);
   }
 
-  printf("end of aes_enc_cbc\n");
-  printf("length: %d\n", length);
-  printf("bytes encrypted: %d\n", bytesEncrypted);
+  // printf("end of aes_enc_cbc\n");
+  // printf("length: %d\n", length);
+  // printf("bytes encrypted: %d\n", bytesEncrypted);
 }
 
 void aes_dec_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
@@ -356,8 +357,8 @@ void aes_dec_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
     memcpy(pctx->accu, buff, AES_BLOCK_SIZE);
   }
 
-  printf("end of aes_dec_cbc\n");
-  printf("length: %d\n", length);
-  printf("bytes decrypted: %d\n", bytesDencrypted);
+  // printf("end of aes_dec_cbc\n");
+  // printf("length: %d\n", length);
+  // printf("bytes decrypted: %d\n", bytesDencrypted);
 }
 

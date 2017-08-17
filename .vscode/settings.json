@@ -4,6 +4,12 @@
         "stdio.h": "c",
         "cstdio": "c",
         "stdlib.h": "c",
-        "cstdlib": "c"
+        "cstdlib": "c",
+        "unistd.h": "c",
+        "string.h": "c",
+        "dirent.h": "c",
+        "pthread.h": "c",
+        "time.h": "c",
+        "random.h": "c"
     }
 }
