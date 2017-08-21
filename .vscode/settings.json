@@ -10,6 +10,8 @@
         "dirent.h": "c",
         "pthread.h": "c",
         "time.h": "c",
-        "random.h": "c"
+        "random.h": "c",
+        "inttypes.h": "c",
+        "stdint.h": "c"
     }
 }

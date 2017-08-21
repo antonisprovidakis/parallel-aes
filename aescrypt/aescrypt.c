@@ -19,6 +19,8 @@
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  
  */
+
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,7 +99,7 @@ struct queue
   unsigned int size;
   struct q_node *q_head;
   struct q_node *q_tail;
-  pthread_rwlock_t q_lock;
+  // pthread_rwlock_t q_lock;
 };
 
 int queue_init(struct queue *);
@@ -111,16 +113,16 @@ int queue_is_empty(struct queue *);
 */
 int queue_init(struct queue *qp)
 {
-  int err;
+  // int err;
 
   qp->size = 0;
   qp->q_head = NULL;
   qp->q_tail = NULL;
 
-  err = pthread_rwlock_init(&qp->q_lock, NULL);
+  // err = pthread_rwlock_init(&qp->q_lock, NULL);
 
-  if (err != 0)
-    return (err);
+  // if (err != 0)
+  //   return (err);
   /* ... continue initialization ... */
   return (0);
 }
@@ -151,7 +153,7 @@ int node_enqueue(struct queue *qp, struct q_node *node)
     return 0;
   }
 
-  pthread_rwlock_wrlock(&qp->q_lock);
+  // pthread_rwlock_wrlock(&qp->q_lock);
 
   node->q_prev = NULL;
 
@@ -164,7 +166,7 @@ int node_enqueue(struct queue *qp, struct q_node *node)
 
   qp->size++;
 
-  pthread_rwlock_unlock(&qp->q_lock);
+  // pthread_rwlock_unlock(&qp->q_lock);
 
   return 1;
 }
@@ -181,7 +183,7 @@ struct q_node *node_dequeue(struct queue *qp)
     return NULL;
   }
 
-  pthread_rwlock_wrlock(&qp->q_lock);
+  // pthread_rwlock_wrlock(&qp->q_lock);
 
   node = qp->q_head;
   qp->q_head = (qp->q_head)->q_prev;
@@ -189,7 +191,7 @@ struct q_node *node_dequeue(struct queue *qp)
 
   qp->size--;
 
-  pthread_rwlock_unlock(&qp->q_lock);
+  // pthread_rwlock_unlock(&qp->q_lock);
 
   return node;
 }
@@ -203,11 +205,11 @@ int queue_is_empty(struct queue *qp)
     return 0;
   }
 
-  pthread_rwlock_rdlock(&qp->q_lock);
+  // pthread_rwlock_rdlock(&qp->q_lock);
 
   empty = qp->size == 0;
 
-  pthread_rwlock_unlock(&qp->q_lock);
+  // pthread_rwlock_unlock(&qp->q_lock);
 
   return empty;
 }
@@ -334,12 +336,13 @@ void *aes_encrypt_thread_func_wrapper(void *q)
 
 int main(int argc, char *argv[])
 {
-  clock_t start, end;
+  struct timespec start, end;
   double cpu_time_used;
   pthread_t *threads;
   char *in_file_name;
   char str_buff[512] = "";
-  struct queue *jobs_queue;
+
+  struct queue **jobs_queue_array;
   int opt;
   unsigned int key_length = 128;
   unsigned int num_of_threads = 1;
@@ -404,7 +407,7 @@ int main(int argc, char *argv[])
       // printf("test1\n");
       PART_SIZE = (unsigned int)strtoul(optarg, NULL, 10);
       // printf("PART_SIZE: %d\n", PART_SIZE);
-      
+
       if (PART_SIZE < 1)
       {
         // printf("test3\n");
@@ -428,18 +431,36 @@ int main(int argc, char *argv[])
 
   threads = malloc(sizeof(pthread_t) * num_of_threads);
 
-  jobs_queue = malloc(sizeof(struct queue));
-  if (jobs_queue == NULL)
+  jobs_queue_array = malloc(sizeof(struct queue *) * num_of_threads);
+
+  if (jobs_queue_array == NULL)
   {
-    perror("Couldn't create jobs_queue. Not enough memory!");
+    perror("Couldn't create jobs_queue_array. Not enough memory!");
     exit(EXIT_FAILURE);
   }
 
-  if (queue_init(jobs_queue) != 0)
+  for (i = 0; i < num_of_threads; i++)
   {
-    perror("Error in queue init");
-    exit(EXIT_FAILURE);
+    jobs_queue_array[i] = malloc(sizeof(struct queue));
+
+    if (jobs_queue_array[i] == NULL)
+    {
+      perror("Couldn't create jobs_queue. Not enough memory!");
+      exit(EXIT_FAILURE);
+    }
+
+    if (queue_init(jobs_queue_array[i]) != 0)
+    {
+      perror("Error in queue init");
+      exit(EXIT_FAILURE);
+    }
   }
+
+  // if (queue_init(jobs_queue) != 0)
+  // {
+  //   perror("Error in queue init");
+  //   exit(EXIT_FAILURE);
+  // }
 
   if (verbose == 1)
   {
@@ -501,7 +522,17 @@ int main(int argc, char *argv[])
     // open dir
     if ((dp = opendir(TEMP_FOLDER)) != NULL)
     {
-      unsigned int job_count = 0;
+      unsigned int current_queue_index = 0;
+      unsigned int NUM_OF_FILES;
+      FILE *fp = popen("ls -1 temp | wc -l", "r");
+      fscanf(fp, "%d", &NUM_OF_FILES);
+      pclose(fp);
+      printf("Number of files: %d\n", NUM_OF_FILES);
+
+      unsigned int MAX_THREAD_JOBS = NUM_OF_FILES / num_of_threads + NUM_OF_FILES % num_of_threads;
+      printf("Number of MAX_THREAD_JOBS: %d - %d - %d\n", MAX_THREAD_JOBS, NUM_OF_FILES / num_of_threads, NUM_OF_FILES % num_of_threads);
+
+      unsigned int file_index = 0;
       struct q_node *node;
 
       while ((ep = readdir(dp)) != NULL)
@@ -509,20 +540,25 @@ int main(int argc, char *argv[])
         if (!strcmp(ep->d_name, ".") || !strcmp(ep->d_name, ".."))
           continue;
 
+        if (file_index != 0 && file_index % MAX_THREAD_JOBS == 0)
+        {
+          current_queue_index++;
+        }
+
         node = malloc(sizeof(struct q_node));
 
         if (node != NULL)
         {
-          node->job.id = job_count;
+          node->job.id = file_index;
           node->job.iv = iv;
           snprintf(node->job.in_file_name, sizeof(node->job.in_file_name), "./%s/%s", TEMP_FOLDER, ep->d_name);
           snprintf(node->job.out_file_name, sizeof(node->job.out_file_name), "./%s/%s.aes", ENC_FOLDER, ep->d_name);
           node->job.key = key;
           node->job.key_length = &key_length;
 
-          node_enqueue(jobs_queue, node);
+          node_enqueue(jobs_queue_array[current_queue_index], node);
 
-          job_count++;
+          file_index++;
         }
       }
 
@@ -531,50 +567,63 @@ int main(int argc, char *argv[])
     else
       perror("Couldn't open the directory");
 
-    // printf("Size of Queue: %d\n\n", jobs_queue->size);
+/*
+    // printf("Size of jobs_queue_array: %d\n\n", sizeof(jobs_queue_array));
+    struct q_node *n = NULL;
 
-    // struct q_node *n = NULL;
-
-    // while (!queue_is_empty(jobs_queue))
-    // {
-    // n = node_dequeue(jobs_queue);
-    // struct job j = n->job;
-
-    // printf("Job_ID: %d\nIn File Name: %s\nOut File Name: %s\nKey Length: %u\n", j.id, j.in_file_name, j.out_file_name, *(j.key_length));
-    // printf("Key: \n");
-    // printHex(j.key, *(j.key_length));
-    // printf("iv: \n");
-    // printHex(j.iv, AES_BLOCK_SIZE * 8);
-
-    // printf("\n\n");
-    // }
-
-    start = clock();
-
-    for (i = 0; i < num_of_threads && !queue_is_empty(jobs_queue); i++)
+    for (i = 0; i < num_of_threads; i++)
     {
-      pthread_create(&threads[i], NULL, aes_encrypt_thread_func_wrapper, (void *)jobs_queue);
+
+      printf("Size of Queue: %d\n\n", jobs_queue_array[i]->size);
+      
+
+      while (!queue_is_empty(jobs_queue_array[i]))
+      {
+        n = node_dequeue(jobs_queue_array[i]);
+        struct job j = n->job;
+
+        printf("Job_ID: %d\nIn File Name: %s\nOut File Name: %s\nKey Length: %u\n", j.id, j.in_file_name, j.out_file_name, *(j.key_length));
+        printf("Key: \n");
+        printHex(j.key, *(j.key_length));
+        printf("iv: \n");
+        printHex(j.iv, AES_BLOCK_SIZE * 8);
+
+        printf("\n\n");
+      }
+    }
+    */
+
+    clock_gettime(CLOCK_MONOTONIC_RAW, &start);
+    
+    // for (i = 0; i < num_of_threads && !queue_is_empty(jobs_queue); i++)
+    for (i = 0; i < num_of_threads; i++)
+    {
+      pthread_create(&threads[i], NULL, aes_encrypt_thread_func_wrapper, (void *)jobs_queue_array[i]);
       // printf("Create thread: %d\n", i);
     }
 
-    int t = 0;
-
-    for (t = 0; t < i; t++)
+    // for (t = 0; t < i; t++)
+    for (i = 0; i < num_of_threads; i++)    
     {
-      (void)pthread_join(threads[t], NULL);
+      // (void)pthread_join(threads[t], NULL);
+      (void)pthread_join(threads[i], NULL);
       // printf("waiting thread with id %lu\n", threads[t]);
     }
 
-    end = clock();
-    cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
-    printf("time for parallel part: %f\n\n", cpu_time_used);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &end);
+    
+    uint64_t delta_us = (end.tv_sec - start.tv_sec) * 1000000 + (end.tv_nsec - start.tv_nsec) / 1000;
+    printf("time for parallel part: %" PRIu64 "\n", delta_us);
   }
 
   printf("just before clean and exit main\n\n");
 
   memset(iv, 0, AES_BLOCK_SIZE);
   memset(key, 0, 32);
-  queue_destroy(jobs_queue);
+
+  for (i = 0; i < num_of_threads; i++)
+    queue_destroy(jobs_queue_array[i]);
+  
   free(threads);
 
   return 0;

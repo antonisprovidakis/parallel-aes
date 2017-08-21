@@ -321,7 +321,7 @@ int aes_init_iv(struct aes_ctx *pctx, u8 iv[/*16*/])
 void aes_enc_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
 {
 
-  u32 bytesEncrypted = 0;
+  // u32 bytesEncrypted = 0;
 
   u32 i, j;
 
@@ -330,7 +330,7 @@ void aes_enc_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
     for (j = 0; j < AES_BLOCK_SIZE; j++)
     {
       out[j] = in[j] ^ (pctx->accu)[j];
-      bytesEncrypted++;
+      // bytesEncrypted++;
     }
     aes_enc_ecb(out, out, pctx);
     memmove(pctx->accu, out, AES_BLOCK_SIZE);
@@ -343,7 +343,7 @@ void aes_enc_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
 
 void aes_dec_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
 {
-  u32 bytesDencrypted = 0;
+  // u32 bytesDecrypted = 0;
 
   u32 i, j;
   u8 buff[AES_BLOCK_SIZE]; /* if out == in */
@@ -359,6 +359,6 @@ void aes_dec_cbc(u8 *out, u8 *in, u32 length, struct aes_ctx *pctx)
 
   // printf("end of aes_dec_cbc\n");
   // printf("length: %d\n", length);
-  // printf("bytes decrypted: %d\n", bytesDencrypted);
+  // printf("bytes decrypted: %d\n", bytesDecrypted);
 }
 
