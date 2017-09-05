@@ -9,7 +9,7 @@ libaesdir = ../libaes/
 # Remove this comment to compile with debugging symbols.
 CDEBUG = #-g
 CFLAGS = $(CDEBUG) -Wall -I$(libaesdir) -O2
-LDFLAGS = -g -laes -L$(libaesdir)
+LDFLAGS = -g -laes -pthread -L$(libaesdir)
 INSTALL = install -c
 
 prefix = /usr
