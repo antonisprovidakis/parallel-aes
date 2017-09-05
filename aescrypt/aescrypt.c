@@ -17,7 +17,7 @@
  
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
- 
+
  */
 
 #include <inttypes.h>
@@ -99,7 +99,6 @@ struct queue
   unsigned int size;
   struct q_node *q_head;
   struct q_node *q_tail;
-  // pthread_rwlock_t q_lock;
 };
 
 int queue_init(struct queue *);
@@ -113,16 +112,9 @@ int queue_is_empty(struct queue *);
 */
 int queue_init(struct queue *qp)
 {
-  // int err;
-
   qp->size = 0;
   qp->q_head = NULL;
   qp->q_tail = NULL;
-
-  // err = pthread_rwlock_init(&qp->q_lock, NULL);
-
-  // if (err != 0)
-  //   return (err);
   /* ... continue initialization ... */
   return (0);
 }
@@ -153,8 +145,6 @@ int node_enqueue(struct queue *qp, struct q_node *node)
     return 0;
   }
 
-  // pthread_rwlock_wrlock(&qp->q_lock);
-
   node->q_prev = NULL;
 
   if (qp->size == 0)
@@ -165,8 +155,6 @@ int node_enqueue(struct queue *qp, struct q_node *node)
   qp->q_tail = node;
 
   qp->size++;
-
-  // pthread_rwlock_unlock(&qp->q_lock);
 
   return 1;
 }
@@ -179,19 +167,13 @@ struct q_node *node_dequeue(struct queue *qp)
   struct q_node *node;
 
   if (queue_is_empty(qp))
-  {
     return NULL;
-  }
-
-  // pthread_rwlock_wrlock(&qp->q_lock);
 
   node = qp->q_head;
   qp->q_head = (qp->q_head)->q_prev;
   node->q_prev = NULL;
 
   qp->size--;
-
-  // pthread_rwlock_unlock(&qp->q_lock);
 
   return node;
 }
@@ -201,15 +183,9 @@ int queue_is_empty(struct queue *qp)
   int empty = 0;
 
   if (qp == NULL)
-  {
     return 0;
-  }
-
-  // pthread_rwlock_rdlock(&qp->q_lock);
 
   empty = qp->size == 0;
-
-  // pthread_rwlock_unlock(&qp->q_lock);
 
   return empty;
 }
@@ -357,7 +333,6 @@ int main(int argc, char *argv[])
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
                            '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00'};
 
-  // while ((opt = getopt(argc, argv, "dm:i:o:k:t:hv")) != -1)
   while ((opt = getopt(argc, argv, "dm:i:k:t:p:hv")) != -1)
   {
     switch (opt)
@@ -380,10 +355,6 @@ int main(int argc, char *argv[])
 
       strcpy(in_file_name, optarg);
       break;
-    // case 'o':
-    //   if (!(out = fopen(optarg, "w")))
-    //     usage("cannot open output file for writing.");
-    //   break;
     case 'k':
       get_key = 1;
       for (i = 0; i < min((unsigned int)strlen(optarg), key_length >> 2); i++)
@@ -403,18 +374,9 @@ int main(int argc, char *argv[])
       printf("Num of threads is: %d\n", num_of_threads);
       break;
     case 'p':
-      // TODO: problem here. TEST
-      // printf("test1\n");
       PART_SIZE = (unsigned int)strtoul(optarg, NULL, 10);
-      // printf("PART_SIZE: %d\n", PART_SIZE);
-
       if (PART_SIZE < 1)
-      {
-        // printf("test3\n");
         usage("part size parameter is not valid. Use a positive integer.\n");
-      }
-      // printf("test4\n");
-      // usage(NULL);
       break;
     case 'v':
       verbose = 1;
@@ -455,12 +417,6 @@ int main(int argc, char *argv[])
       exit(EXIT_FAILURE);
     }
   }
-
-  // if (queue_init(jobs_queue) != 0)
-  // {
-  //   perror("Error in queue init");
-  //   exit(EXIT_FAILURE);
-  // }
 
   if (verbose == 1)
   {
@@ -602,12 +558,9 @@ int main(int argc, char *argv[])
       // printf("Create thread: %d\n", i);
     }
 
-    // for (t = 0; t < i; t++)
     for (i = 0; i < num_of_threads; i++)    
     {
-      // (void)pthread_join(threads[t], NULL);
       (void)pthread_join(threads[i], NULL);
-      // printf("waiting thread with id %lu\n", threads[t]);
     }
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &end);
