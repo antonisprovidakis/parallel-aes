@@ -1,0 +1,17 @@
+{
+    "files.associations": {
+        "aescrypt.h": "c",
+        "stdio.h": "c",
+        "cstdio": "c",
+        "stdlib.h": "c",
+        "cstdlib": "c",
+        "unistd.h": "c",
+        "string.h": "c",
+        "dirent.h": "c",
+        "pthread.h": "c",
+        "time.h": "c",
+        "random.h": "c",
+        "inttypes.h": "c",
+        "stdint.h": "c"
+    }
+}
