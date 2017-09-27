@@ -12,6 +12,11 @@
         "time.h": "c",
         "random.h": "c",
         "inttypes.h": "c",
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "energymon.h": "c",
+        "energymon-default.h": "c",
+        "ioctl.h": "c",
+        "array": "c",
+        "energymon-odroid-ioctl.h": "c"
     }
 }

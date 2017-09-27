@@ -8,8 +8,8 @@ BIN_OBJ = aescrypt.o
 libaesdir = ../libaes/
 # Remove this comment to compile with debugging symbols.
 CDEBUG = #-g
-CFLAGS = $(CDEBUG) -Wall -I$(libaesdir) -O2
-LDFLAGS = -g -laes -pthread -L$(libaesdir)
+CFLAGS = $(CDEBUG) -Wall -I$(libaesdir) -I/usr/local/include/energymon/ -O2
+LDFLAGS = -g -laes -pthread -L$(libaesdir) -L/usr/local/lib -lenergymon-default
 INSTALL = install -c
 
 prefix = /usr
