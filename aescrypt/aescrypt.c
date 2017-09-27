@@ -18,6 +18,21 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+
+
+ ./aescrypt -k 000102030405060708090a0b0c0d0e0f -i book.pdf -t 4 -p 2097152 
+
+
+ 
+  timing (ms):
+
+  struct timeval t1, t2;
+  double elapsed_time;
+  gettimeofday(&t1, NULL);
+  gettimeofday(&t2, NULL);
+  elapsed_time = (t2.tv_sec - t1.tv_sec) * 1000.0 + (t2.tv_usec - t1.tv_usec) / 1000.0;
+  printf("Total time for parallel part: %f ms\n", elapsed_time);
+
  */
 
 #include <inttypes.h>
@@ -29,8 +44,8 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <pthread.h>
-#include <time.h>
 #include <aes.h>
+#include <energymon-default.h>
 
 #define TEMP_FOLDER "temp"
 #define ENC_FOLDER "enc"
@@ -39,7 +54,6 @@
 
 unsigned int verbose = 0;
 
-unsigned int counter = 0;
 unsigned int PART_SIZE = 2097152; // Default, 2M
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
@@ -48,7 +62,7 @@ static void usage(/*@null@*/ char *err)
 {
   if (err)
     printf("error: %s\n", err);
-  printf("usage: aescrypt [-m [128 192 256]] [-i input_file] [-o output_file] -k hexkey [-t num_of_threads] [-p part_size] \n");
+  printf("usage: aescrypt [-m [128 192 256]] -i input_file -k hexkey [-t num_of_threads] [-p part_size] \n");
   printf("aescrypt is a free program distributed under the GPL v3.\n");
   exit(EXIT_FAILURE);
 }
@@ -75,6 +89,8 @@ static void printHex(unsigned char *k, unsigned int kl)
   }
 }
 
+//////// Queue staff
+
 struct job
 {
   unsigned int id;
@@ -85,8 +101,6 @@ struct job
   unsigned int *key_length;
   struct aes_ctx ctx;
 };
-
-//////// Queue staff
 
 struct q_node
 {
@@ -312,8 +326,11 @@ void *aes_encrypt_thread_func_wrapper(void *q)
 
 int main(int argc, char *argv[])
 {
-  struct timespec start, end;
-  double cpu_time_used;
+  energymon em;
+  struct timespec ts;
+  // uint64_t start_uj, end_uj;
+  uint64_t elapsed_time_us;
+
   pthread_t *threads;
   char *in_file_name;
   char str_buff[512] = "";
@@ -371,7 +388,7 @@ int main(int argc, char *argv[])
       if (!isdigit(num_of_threads) && num_of_threads < 1)
         usage("threads parameter is not valid. Use a positive integer.");
 
-      printf("Num of threads is: %d\n", num_of_threads);
+      printf("\n## Number of threads: %d\n", num_of_threads);
       break;
     case 'p':
       PART_SIZE = (unsigned int)strtoul(optarg, NULL, 10);
@@ -450,7 +467,8 @@ int main(int argc, char *argv[])
     }
 
     snprintf(str_buff, sizeof(str_buff), "split -b %d -a 5 %s temp/%s.part_", PART_SIZE, in_file_name, in_file_name);
-    printf("cmd = %s\n", str_buff);
+    //printf("cmd = %s\n", str_buff);
+    printf("-- Splitting files.\n");
     system(str_buff); // run split command
 
     free(in_file_name);
@@ -483,10 +501,11 @@ int main(int argc, char *argv[])
       FILE *fp = popen("ls -1 temp | wc -l", "r");
       fscanf(fp, "%d", &NUM_OF_FILES);
       pclose(fp);
-      printf("Number of files: %d\n", NUM_OF_FILES);
+      printf("## Number of files: %d\n", NUM_OF_FILES);
 
       unsigned int MAX_THREAD_JOBS = NUM_OF_FILES / num_of_threads + NUM_OF_FILES % num_of_threads;
-      printf("Number of MAX_THREAD_JOBS: %d - %d - %d\n", MAX_THREAD_JOBS, NUM_OF_FILES / num_of_threads, NUM_OF_FILES % num_of_threads);
+      // printf("Number of MAX_THREAD_JOBS: %d\n", MAX_THREAD_JOBS);
+      // printf("Number of MAX_THREAD_JOBS: %d - %d - %d\n", MAX_THREAD_JOBS, NUM_OF_FILES / num_of_threads, NUM_OF_FILES % num_of_threads);
 
       unsigned int file_index = 0;
       struct q_node *node;
@@ -523,7 +542,7 @@ int main(int argc, char *argv[])
     else
       perror("Couldn't open the directory");
 
-/*
+    /*
     // printf("Size of jobs_queue_array: %d\n\n", sizeof(jobs_queue_array));
     struct q_node *n = NULL;
 
@@ -549,8 +568,15 @@ int main(int argc, char *argv[])
     }
     */
 
-    clock_gettime(CLOCK_MONOTONIC_RAW, &start);
-    
+    // get the energymon instance and initialize
+    energymon_get_default(&em);
+    // em.finit(&em);
+
+    printf("-- Start parallel encryption. \n");
+
+    (void)energymon_gettime_us(&ts); // e.g. wrap clock_gettime
+    // start_uj = em.fread(&em);
+
     // for (i = 0; i < num_of_threads && !queue_is_empty(jobs_queue); i++)
     for (i = 0; i < num_of_threads; i++)
     {
@@ -558,25 +584,35 @@ int main(int argc, char *argv[])
       // printf("Create thread: %d\n", i);
     }
 
-    for (i = 0; i < num_of_threads; i++)    
+    for (i = 0; i < num_of_threads; i++)
     {
       (void)pthread_join(threads[i], NULL);
     }
 
-    clock_gettime(CLOCK_MONOTONIC_RAW, &end);
+    elapsed_time_us = energymon_gettime_us(&ts);
+    // end_uj = em.fread(&em);
+
+    printf("-- End parallel encryption.\n");
+
+    // em.ffinish(&em);
     
-    uint64_t delta_us = (end.tv_sec - start.tv_sec) * 1000000 + (end.tv_nsec - start.tv_nsec) / 1000;
-    printf("time for parallel part: %" PRIu64 "\n", delta_us);
+    printf("Total time for parallel part: %" PRIu64 " us\n", elapsed_time_us);
+
+    // printf("## Total energy for do_work(): %" PRIu64" Joule\n", end_uj - start_uj); // microJoule
+    // printf("## Average power of do_work(): %.3f Watt\n", uj / elapsed_time_us);
+
+    //printf("DEBUG:: start_uj: %" PRIu64"\n", start_uj);
+    //printf("DEBUG:: end_uj: %" PRIu64"\n", end_uj);
   }
 
-  printf("just before clean and exit main\n\n");
+  printf("DEBUG:: Just before clean and exit main.\n\n");
 
   memset(iv, 0, AES_BLOCK_SIZE);
   memset(key, 0, 32);
 
   for (i = 0; i < num_of_threads; i++)
     queue_destroy(jobs_queue_array[i]);
-  
+
   free(threads);
 
   return 0;

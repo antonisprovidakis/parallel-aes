@@ -1,0 +1,45 @@
+*** Gia na egkatasthseis to Monitor library sto systhma
+
+Ston fakelo "parallel-aes/energymon-master" trexeis tis entoles mia pros mia (kane copy-paste):
+
+mkdir _build 
+cd _build
+cmake .. -DDEFAULT=odroid-ioctl
+make
+sudo make install
+
+
+# mkdir _build && cd _build && cmake .. -DDEFAULT=odroid-ioctl && make && sudo make install
+
+%%%% an yparxei problima kata tin ektelesh twn parapanw entolwn, bgaineis apo ton fakelo "_build", ton sbineis kai xanatrexeis tis entoles apo ton arxi.
+
+
+
+
+*** Epeita sto fakelo "parallel-aes" trexeis: 
+
+make clean
+make
+
+# cd ../../ && make clean && make
+
+*** Twra tha exei ginei build to executable "aescrypt".
+To vazeis sto fakelo "test" mazi me kapoio arxeio pros kryptografisi (opws ginotan mexri twra, klassika)
+
+
+*** Trexe:  ./aescrypt -k 000102030405060708090a0b0c0d0e0f -i book.pdf -t 1 -p 2097152
+(an deis kai kanei tipota perierga, bale ena pio megalo arxeio (px. 200 MB) H kane to orisma "p" mikrotero)
+
+
+*** Otan trexei, tha deis kapoia epipleon mhnymata, opws: 
+INIT of energymon
+in energymon_init_odroid_ioctl
+kai ta loipa.
+
+Kanonika tha prepei meta to mhnyma "START PARALLEL" na typwsei kamposes fores (mexri na teleiwsei):
+
+puts("in get_sensors_data\n");
+
+printf("armuV: %f\n", data->armuV);
+printf("armuA: %f\n", data->armuA);
+printf("armuW: %f\n\n", data->armuW);
