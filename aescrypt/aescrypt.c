@@ -18,12 +18,16 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+-----------------------
+ exec command:   ./aescrypt -k 000102030405060708090a0b0c0d0e0f -i book.pdf -t 4 -p 2097152 
+---------------------
 
+useful tools:
+*) lscpu (CPU info)
+*) lstopo (Graphically display the topology of processor)
 
- ./aescrypt -k 000102030405060708090a0b0c0d0e0f -i book.pdf -t 4 -p 2097152 
+ ---------------------------------
 
-
- 
   timing (ms):
 
   struct timeval t1, t2;
@@ -35,6 +39,8 @@
 
  */
 
+#define _GNU_SOURCE
+ 
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +50,7 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <pthread.h>
+#include <sched.h>
 #include <aes.h>
 #include <energymon-default.h>
 
@@ -292,11 +299,20 @@ int aes_encrypt_part(unsigned char *iv, char *in_file_name, char *out_file_name,
   return 1; // success
 }
 
-void *aes_encrypt_thread_func_wrapper(void *q)
+struct thread_data
 {
-  // printf("aes_encrypt_thread_func_wrapper START, in thread: %lu\n", (unsigned long)pthread_self());
+  pthread_t thread_id;
+  int core_id;
+  struct queue *jobs;
+};
 
-  struct queue *jobs_queue = (struct queue *)q;
+void *aes_encrypt_thread_func_wrapper(void *td)
+{
+  printf("Thread ID: %lu, CPU: %d\n", pthread_self(), sched_getcpu());    
+  
+  struct thread_data *data = (struct thread_data*) td;
+
+  struct queue *jobs_queue = data->jobs;
   struct q_node *node;
   struct job *job;
 
@@ -331,11 +347,16 @@ int main(int argc, char *argv[])
   // uint64_t start_uj, end_uj;
   uint64_t elapsed_time_us;
 
-  pthread_t *threads;
+  int current_core_id = 0;
+  int NUM_OF_CPUs = sysconf(_SC_NPROCESSORS_ONLN);
+  printf("\n## Number of CPUs: %d\n", NUM_OF_CPUs);
+  pthread_attr_t attr;
+  cpu_set_t cpus;
+  struct thread_data *td;
+
   char *in_file_name;
   char str_buff[512] = "";
 
-  struct queue **jobs_queue_array;
   int opt;
   unsigned int key_length = 128;
   unsigned int num_of_threads = 1;
@@ -388,7 +409,7 @@ int main(int argc, char *argv[])
       if (!isdigit(num_of_threads) && num_of_threads < 1)
         usage("threads parameter is not valid. Use a positive integer.");
 
-      printf("\n## Number of threads: %d\n", num_of_threads);
+      printf("## Number of threads: %d\n\n", num_of_threads);
       break;
     case 'p':
       PART_SIZE = (unsigned int)strtoul(optarg, NULL, 10);
@@ -408,27 +429,25 @@ int main(int argc, char *argv[])
   // if (get_key == 0)
   // usage("key not specified.");
 
-  threads = malloc(sizeof(pthread_t) * num_of_threads);
+  td = malloc(sizeof(struct thread_data) * num_of_threads);
 
-  jobs_queue_array = malloc(sizeof(struct queue *) * num_of_threads);
-
-  if (jobs_queue_array == NULL)
+  if (td == NULL)
   {
-    perror("Couldn't create jobs_queue_array. Not enough memory!");
+    perror("Couldn't create td. Not enough memory!");
     exit(EXIT_FAILURE);
   }
 
   for (i = 0; i < num_of_threads; i++)
   {
-    jobs_queue_array[i] = malloc(sizeof(struct queue));
-
-    if (jobs_queue_array[i] == NULL)
+    td[i].jobs = malloc(sizeof(struct queue));
+    
+    if (td[i].jobs == NULL)
     {
       perror("Couldn't create jobs_queue. Not enough memory!");
       exit(EXIT_FAILURE);
     }
-
-    if (queue_init(jobs_queue_array[i]) != 0)
+    
+    if (queue_init(td[i].jobs) != 0)
     {
       perror("Error in queue init");
       exit(EXIT_FAILURE);
@@ -531,7 +550,7 @@ int main(int argc, char *argv[])
           node->job.key = key;
           node->job.key_length = &key_length;
 
-          node_enqueue(jobs_queue_array[current_queue_index], node);
+          node_enqueue(td[current_queue_index].jobs, node);
 
           file_index++;
         }
@@ -549,12 +568,12 @@ int main(int argc, char *argv[])
     for (i = 0; i < num_of_threads; i++)
     {
 
-      printf("Size of Queue: %d\n\n", jobs_queue_array[i]->size);
+      printf("Size of Queue: %d\n\n", td[i].jobs->size);
       
 
-      while (!queue_is_empty(jobs_queue_array[i]))
+      while (!queue_is_empty(td[i].jobs))
       {
-        n = node_dequeue(jobs_queue_array[i]);
+        n = node_dequeue(td[i].jobs);
         struct job j = n->job;
 
         printf("Job_ID: %d\nIn File Name: %s\nOut File Name: %s\nKey Length: %u\n", j.id, j.in_file_name, j.out_file_name, *(j.key_length));
@@ -577,16 +596,28 @@ int main(int argc, char *argv[])
     (void)energymon_gettime_us(&ts); // e.g. wrap clock_gettime
     // start_uj = em.fread(&em);
 
-    // for (i = 0; i < num_of_threads && !queue_is_empty(jobs_queue); i++)
+    pthread_attr_init(&attr);
+    
     for (i = 0; i < num_of_threads; i++)
     {
-      pthread_create(&threads[i], NULL, aes_encrypt_thread_func_wrapper, (void *)jobs_queue_array[i]);
+       if (current_core_id > NUM_OF_CPUs - 1 )
+         current_core_id = 0;
+
+       td[i].core_id = current_core_id;
+
+       CPU_ZERO(&cpus);
+       CPU_SET(td[i].core_id, &cpus);
+       pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus);
+
+      pthread_create(&td[i].thread_id, &attr, aes_encrypt_thread_func_wrapper, (void *)&td[i]);
       // printf("Create thread: %d\n", i);
+
+      current_core_id++;
     }
 
     for (i = 0; i < num_of_threads; i++)
     {
-      (void)pthread_join(threads[i], NULL);
+      (void)pthread_join(td[i].thread_id, NULL);
     }
 
     elapsed_time_us = energymon_gettime_us(&ts);
@@ -611,9 +642,9 @@ int main(int argc, char *argv[])
   memset(key, 0, 32);
 
   for (i = 0; i < num_of_threads; i++)
-    queue_destroy(jobs_queue_array[i]);
+    queue_destroy(td[i].jobs);
 
-  free(threads);
+  free(td);
 
   return 0;
 }
