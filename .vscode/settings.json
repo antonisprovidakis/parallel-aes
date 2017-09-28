@@ -17,6 +17,7 @@
         "energymon-default.h": "c",
         "ioctl.h": "c",
         "array": "c",
-        "energymon-odroid-ioctl.h": "c"
+        "energymon-odroid-ioctl.h": "c",
+        "ctype.h": "c"
     }
 }
