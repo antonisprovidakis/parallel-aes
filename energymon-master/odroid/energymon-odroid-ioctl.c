@@ -31,13 +31,12 @@ int energymon_get_default(energymon *em)
 }
 #endif
 
-#define SENSOR_POLL_DELAY_US_DEFAULT 500000 //263808
+#define SENSOR_POLL_DELAY_US_DEFAULT 263808// 500000 //263808
 #define SENSOR_COUNT 4
 
 #define INA231_IOCGREG _IOR('i', 1, ina231_iocreg_t *)
 #define INA231_IOCSSTATUS _IOW('i', 2, ina231_iocreg_t *)
 #define INA231_IOCGSTATUS _IOR('i', 3, ina231_iocreg_t *)
-
 
 /**
  * This struct is defined in the kernel: drivers/hardkernel/ina231-misc.h
@@ -94,11 +93,9 @@ static inline int read_sensor_data(ina231_sensor_t *sensor)
   return ioctl(sensor->fd, INA231_IOCGREG, &sensor->data) < 0;
 }
 
-static inline void get_sensors_data(FILE *f, ina231_sensor_t sensors[], sensors_data_t *data)
-{
-
-
-  //fprintf(f,"test\n");
+// static inline void get_sensors_data(FILE *f, ina231_sensor_t sensors[], sensors_data_t *data)
+// {
+/*
   data->armuV = (float)(sensors[0].data.cur_uV / 100000) / 10;
   data->armuA = (float)(sensors[0].data.cur_uA / 1000) / 1000;
   data->armuW = (float)(sensors[0].data.cur_uW / 1000) / 1000;
@@ -127,7 +124,7 @@ static inline void get_sensors_data(FILE *f, ina231_sensor_t sensors[], sensors_
   fprintf(f,"%.3f\t", data->g3duA);
   fprintf(f,"%.3f\t", data->g3duW); 
   fprintf(f,"\n"); 
-
+*/
 //  printf("kfcuW: %.3f\n\n", data->kfcuW);
 
 /*puts("Sensors Dataset: \n");
@@ -163,7 +160,7 @@ static inline void get_sensors_data(FILE *f, ina231_sensor_t sensors[], sensors_
   printf("g3duA: %.3f\n", data->g3duA);
   printf("g3duW: %.3f\n\n", data->g3duW);
 */
-}
+// }
 
 /**
  * Close all the sensor device files.
@@ -245,8 +242,8 @@ int energymon_finish_odroid_ioctl(energymon *em)
  */
 static void *odroid_ioctl_poll_sensors(void *args)
 {
-  puts("-- Poll data from sensors.");
-  puts("-- Create a Datalog file.");
+  // puts("-- Poll data from sensors.");
+  // puts("-- Create a Datalog file.");
 
   energymon_odroid_ioctl *state = (energymon_odroid_ioctl *)args;
   uint64_t sum_uw;
@@ -254,9 +251,9 @@ static void *odroid_ioctl_poll_sensors(void *args)
   int64_t exec_us;
   int err_save;
   struct timespec ts;
-  FILE *f;
+  // FILE *f;
 
-  sensors_data_t sensors_data;
+  // sensors_data_t sensors_data;
 
   if (energymon_clock_gettime(&ts))
   {
@@ -264,10 +261,10 @@ static void *odroid_ioctl_poll_sensors(void *args)
     perror("odroid_ioctl_poll_sensors");
     return (void *)NULL;
   }
-  
-  f = fopen("datalog.log", "w"); 
 
-energymon_sleep_us(state->poll_delay_us, &state->poll_sensors);
+  // f = fopen("datalog.log", "a");
+
+  energymon_sleep_us(state->poll_delay_us, &state->poll_sensors);
   while (state->poll_sensors)
   {
     //puts("In while of thread\n");
@@ -282,7 +279,7 @@ energymon_sleep_us(state->poll_delay_us, &state->poll_sensors);
     }
     err_save = errno;
 
-    get_sensors_data(f, state->sensor, &sensors_data);
+    // get_sensors_data(f, state->sensor, &sensors_data);
 
     exec_us = energymon_gettime_us(&ts);
     if (err_save)
@@ -299,7 +296,7 @@ energymon_sleep_us(state->poll_delay_us, &state->poll_sensors);
     errno = 0;
   }
 
-    fclose(f);  
+  // fclose(f);
 
   return (void *)NULL;
 }
@@ -326,7 +323,6 @@ int energymon_init_odroid_ioctl(energymon *em)
 
   // TODO: determine at runtime
   state->poll_delay_us = SENSOR_POLL_DELAY_US_DEFAULT;
-  //printf("in energymon_init_odroid_ioctl   1\n");
 
   // open and enable the sensors
   if (open_all_sensors(state))
@@ -336,14 +332,12 @@ int energymon_init_odroid_ioctl(energymon *em)
     return -1;
   }
 
-  //printf("in energymon_init_odroid_ioctl   2\n");
-
   // start sensors polling thread
   state->poll_sensors = 1;
   errno = pthread_create(&state->thread, NULL, odroid_ioctl_poll_sensors, state);
 
   //printf("in energymon_init_odroid_ioctl   3\n");
-  
+
   if (errno)
   {
     err_save = errno;

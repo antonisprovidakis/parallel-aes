@@ -16,7 +16,7 @@ extern "C" {
 #include <stddef.h>
 #include "energymon.h"
 
-
+/*
 typedef struct sensors_data_t {
     float armuV;
     float armuA;
@@ -30,23 +30,24 @@ typedef struct sensors_data_t {
     float memuV;
     float memuA;
     float memuW;
-  } sensors_data_t;  
+  } sensors_data_t;
+  */
 
-int energymon_init_odroid_ioctl(energymon* em);
+int energymon_init_odroid_ioctl(energymon *em);
 
-uint64_t energymon_read_total_odroid_ioctl(const energymon* em);
+uint64_t energymon_read_total_odroid_ioctl(const energymon *em);
 
-int energymon_finish_odroid_ioctl(energymon* em);
+int energymon_finish_odroid_ioctl(energymon *em);
 
-char* energymon_get_source_odroid_ioctl(char* buffer, size_t n);
+char *energymon_get_source_odroid_ioctl(char *buffer, size_t n);
 
-uint64_t energymon_get_interval_odroid_ioctl(const energymon* em);
+uint64_t energymon_get_interval_odroid_ioctl(const energymon *em);
 
-uint64_t energymon_get_precision_odroid_ioctl(const energymon* em);
+uint64_t energymon_get_precision_odroid_ioctl(const energymon *em);
 
 int energymon_is_exclusive_odroid_ioctl(void);
 
-int energymon_get_odroid_ioctl(energymon* em);
+int energymon_get_odroid_ioctl(energymon *em);
 
 #ifdef __cplusplus
 }
