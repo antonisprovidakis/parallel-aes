@@ -315,6 +315,8 @@ void *aes_encrypt_thread_func_wrapper(void *td)
   struct thread_data *data = (struct thread_data *)td;
 
   struct queue *jobs_queue = data->jobs;
+  // printf("Queue size: %d\n\n", jobs_queue->size);
+
   struct q_node *node;
   struct job *job;
 
@@ -545,11 +547,6 @@ int main(int argc, char *argv[])
         if (!strcmp(ep->d_name, ".") || !strcmp(ep->d_name, ".."))
           continue;
 
-        if (file_index != 0 && file_index % MAX_THREAD_JOBS == 0)
-        {
-          current_queue_index++;
-        }
-
         node = malloc(sizeof(struct q_node));
 
         if (node != NULL)
@@ -564,6 +561,10 @@ int main(int argc, char *argv[])
           node_enqueue(td[current_queue_index].jobs, node);
 
           file_index++;
+          current_queue_index++;
+
+	  if(current_queue_index > num_of_threads - 1)
+	    current_queue_index = 0;
         }
       }
 
@@ -604,6 +605,8 @@ int main(int argc, char *argv[])
 
     energymon_get_default(&em);
     em.finit(&em);
+
+    sleep(1);    
 
     printf("-- Start parallel encryption. \n");
 
