@@ -40,7 +40,7 @@ useful tools:
  */
 
 #define _GNU_SOURCE
- 
+
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,6 +56,8 @@ useful tools:
 
 #define TEMP_FOLDER "temp"
 #define ENC_FOLDER "enc"
+#define STATS_FILE_NAME "stats.log"
+
 
 #define BSZ 2048
 
@@ -308,11 +310,13 @@ struct thread_data
 
 void *aes_encrypt_thread_func_wrapper(void *td)
 {
-  printf("Thread ID: %lu, CPU: %d\n", pthread_self(), sched_getcpu());    
-  
-  struct thread_data *data = (struct thread_data*) td;
+  printf("Thread ID: %lu, CPU: %d\n", pthread_self(), sched_getcpu());
+
+  struct thread_data *data = (struct thread_data *)td;
 
   struct queue *jobs_queue = data->jobs;
+  // printf("Queue size: %d\n\n", jobs_queue->size);
+
   struct q_node *node;
   struct job *job;
 
@@ -344,15 +348,20 @@ int main(int argc, char *argv[])
 {
   energymon em;
   struct timespec ts;
-  // uint64_t start_uj, end_uj;
+  uint64_t start_uj, end_uj;
   uint64_t elapsed_time_us;
 
-  int current_core_id = 0;
   int NUM_OF_CPUs = sysconf(_SC_NPROCESSORS_ONLN);
+  int current_core_id = NUM_OF_CPUs - 1; // starting from end to start, in order to utilize the A15 cores first
   printf("\n## Number of CPUs: %d\n", NUM_OF_CPUs);
   pthread_attr_t attr;
   cpu_set_t cpus;
   struct thread_data *td;
+
+  // datalog.txt file
+
+  char filename_no_ext[128] = "";
+  FILE *stats_file;
 
   char *in_file_name;
   char str_buff[512] = "";
@@ -392,6 +401,10 @@ int main(int argc, char *argv[])
         usage("Not enough memory to keep file name in var");
 
       strcpy(in_file_name, optarg);
+
+      strncpy(filename_no_ext, in_file_name, strlen(in_file_name) - 4);
+      // puts(filename_no_ext);
+
       break;
     case 'k':
       get_key = 1;
@@ -440,13 +453,13 @@ int main(int argc, char *argv[])
   for (i = 0; i < num_of_threads; i++)
   {
     td[i].jobs = malloc(sizeof(struct queue));
-    
+
     if (td[i].jobs == NULL)
     {
       perror("Couldn't create jobs_queue. Not enough memory!");
       exit(EXIT_FAILURE);
     }
-    
+
     if (queue_init(td[i].jobs) != 0)
     {
       perror("Error in queue init");
@@ -475,14 +488,14 @@ int main(int argc, char *argv[])
     snprintf(str_buff, sizeof(str_buff), "./%s", TEMP_FOLDER);
     if ((mkdir(str_buff, 00777)) == -1)
     { // temp/ - splitted files are saved here
-      fprintf(stdout, "error in creating dir. Maybe allready exists.\n");
+      fprintf(stdout, "error in creating dir. Maybe already exists.\n");
     }
 
     snprintf(str_buff, sizeof(str_buff), "./%s", ENC_FOLDER);
 
     if ((mkdir(str_buff, 0777)) == -1)
     { // enc/ - encrypted files are saved here
-      fprintf(stdout, "error in creating dir enc. Maybe allready exists.\n");
+      fprintf(stdout, "error in creating dir enc. Maybe already exists.\n");
     }
 
     snprintf(str_buff, sizeof(str_buff), "split -b %d -a 5 %s temp/%s.part_", PART_SIZE, in_file_name, in_file_name);
@@ -512,7 +525,6 @@ int main(int argc, char *argv[])
 
     (void)fclose(rand);
 
-    // open dir
     if ((dp = opendir(TEMP_FOLDER)) != NULL)
     {
       unsigned int current_queue_index = 0;
@@ -522,9 +534,10 @@ int main(int argc, char *argv[])
       pclose(fp);
       printf("## Number of files: %d\n", NUM_OF_FILES);
 
-      unsigned int MAX_THREAD_JOBS = NUM_OF_FILES / num_of_threads + NUM_OF_FILES % num_of_threads;
-      // printf("Number of MAX_THREAD_JOBS: %d\n", MAX_THREAD_JOBS);
-      // printf("Number of MAX_THREAD_JOBS: %d - %d - %d\n", MAX_THREAD_JOBS, NUM_OF_FILES / num_of_threads, NUM_OF_FILES % num_of_threads);
+      unsigned int MAX_THREAD_JOBS = (NUM_OF_FILES / num_of_threads);
+
+      if (NUM_OF_FILES % num_of_threads != 0)
+        MAX_THREAD_JOBS++;
 
       unsigned int file_index = 0;
       struct q_node *node;
@@ -533,11 +546,6 @@ int main(int argc, char *argv[])
       {
         if (!strcmp(ep->d_name, ".") || !strcmp(ep->d_name, ".."))
           continue;
-
-        if (file_index != 0 && file_index % MAX_THREAD_JOBS == 0)
-        {
-          current_queue_index++;
-        }
 
         node = malloc(sizeof(struct q_node));
 
@@ -553,6 +561,10 @@ int main(int argc, char *argv[])
           node_enqueue(td[current_queue_index].jobs, node);
 
           file_index++;
+          current_queue_index++;
+
+	  if(current_queue_index > num_of_threads - 1)
+	    current_queue_index = 0;
         }
       }
 
@@ -587,53 +599,68 @@ int main(int argc, char *argv[])
     }
     */
 
-    // get the energymon instance and initialize
+    pthread_attr_init(&attr);
+
+    stats_file = fopen(STATS_FILE_NAME, "a");
+
     energymon_get_default(&em);
-    // em.finit(&em);
+    em.finit(&em);
+
+    sleep(1);    
 
     printf("-- Start parallel encryption. \n");
 
-    (void)energymon_gettime_us(&ts); // e.g. wrap clock_gettime
-    // start_uj = em.fread(&em);
+    start_uj = em.fread(&em);
+    (void)energymon_gettime_us(&ts);
 
-    pthread_attr_init(&attr);
-    
     for (i = 0; i < num_of_threads; i++)
     {
-       if (current_core_id > NUM_OF_CPUs - 1 )
-         current_core_id = 0;
+      if (current_core_id < 0)
+        current_core_id = NUM_OF_CPUs - 1;
 
-       td[i].core_id = current_core_id;
+      td[i].core_id = current_core_id;
 
-       CPU_ZERO(&cpus);
-       CPU_SET(td[i].core_id, &cpus);
-       pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus);
+      CPU_ZERO(&cpus);
+      CPU_SET(td[i].core_id, &cpus);
+      pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus);
 
       pthread_create(&td[i].thread_id, &attr, aes_encrypt_thread_func_wrapper, (void *)&td[i]);
       // printf("Create thread: %d\n", i);
 
-      current_core_id++;
+      current_core_id--;
     }
 
     for (i = 0; i < num_of_threads; i++)
-    {
       (void)pthread_join(td[i].thread_id, NULL);
-    }
 
+    end_uj = em.fread(&em);
     elapsed_time_us = energymon_gettime_us(&ts);
-    // end_uj = em.fread(&em);
 
     printf("-- End parallel encryption.\n");
 
-    // em.ffinish(&em);
+    em.ffinish(&em);
+
+    printf("\n##Total time for encryption: %" PRIu64 " us\n", elapsed_time_us);
     
-    printf("Total time for parallel part: %" PRIu64 " us\n", elapsed_time_us);
+    uint64_t energy = end_uj - start_uj; // microJoules
+    printf("## Total energy for encryption: %" PRIu64" uj\n", energy);
 
-    // printf("## Total energy for do_work(): %" PRIu64" Joule\n", end_uj - start_uj); // microJoule
-    // printf("## Average power of do_work(): %.3f Watt\n", uj / elapsed_time_us);
+    double watts = (end_uj - start_uj) / (double) elapsed_time_us; // watts
+    printf("## Average power of encryption: %.4f Watts\n", watts);
 
-    //printf("DEBUG:: start_uj: %" PRIu64"\n", start_uj);
-    //printf("DEBUG:: end_uj: %" PRIu64"\n", end_uj);
+    printf("\nDEBUG:: end_uj - start_uj: %" PRIu64"\n", end_uj - start_uj);
+    printf("DEBUG:: start_uj: %" PRIu64"\n", start_uj);
+    printf("DEBUG:: end_uj: %" PRIu64"\n", end_uj);
+
+
+    fprintf(stats_file,"%s\t", filename_no_ext);
+    fprintf(stats_file,"%d\t", num_of_threads);
+    fprintf(stats_file,"%" PRIu64 "\t", elapsed_time_us);
+    fprintf(stats_file,"%" PRIu64 "\t", energy);
+    fprintf(stats_file,"%.4f", watts);
+    
+    fprintf(stats_file,"\n"); 
+    fclose(stats_file);
   }
 
   printf("DEBUG:: Just before clean and exit main.\n\n");

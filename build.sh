@@ -1,6 +1,6 @@
 #!/bin/sh
 
-cd ~/Desktop/parallel-aes-mod/energymon-master/
+cd ~/Desktop/parallel-aes/energymon-master/
 
 rm -rf _build && mkdir _build
 cd _build
