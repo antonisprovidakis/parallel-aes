@@ -17,25 +17,14 @@
  
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+----------------------------
 
------------------------
- exec command:   ./aescrypt -k 000102030405060708090a0b0c0d0e0f -i book.pdf -t 4 -p 2097152 
----------------------
-
-useful tools:
-*) lscpu (CPU info)
-*) lstopo (Graphically display the topology of processor)
-
- ---------------------------------
-
-  timing (ms):
-
-  struct timeval t1, t2;
-  double elapsed_time;
-  gettimeofday(&t1, NULL);
-  gettimeofday(&t2, NULL);
-  elapsed_time = (t2.tv_sec - t1.tv_sec) * 1000.0 + (t2.tv_usec - t1.tv_usec) / 1000.0;
-  printf("Total time for parallel part: %f ms\n", elapsed_time);
+#######################################################################################
+ Changes in order to perform parallel AES enxryption, implemented by Antonis Providakis
+#######################################################################################
+ exec command:   ./aescrypt -k [key] -i [input_file] -t [num_of_threads] -p [split_part_size] 
+ Example:        ./aescrypt -k 000102030405060708090a0b0c0d0e0f -i book.pdf -t 4 -p 2097152 
+#######################################################################################
 
  */
 
