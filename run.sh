@@ -1,6 +1,7 @@
 #!/bin/sh
 
-cd ~/Desktop/parallel-aes/aescrypt/test
+# add the file (you want to encrypt) in "aescrypt/test" folder
+cd aescrypt/test
 
 #rm -rf stats
 rm  stats.log
