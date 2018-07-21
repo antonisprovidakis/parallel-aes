@@ -20,7 +20,7 @@
 ----------------------------
 
 #######################################################################################
- Changes in order to perform parallel AES encryption, implemented by Antonis Providakis
+ Changes in order to perform parallel AES encryption, implemented by Antonios Providakis
 #######################################################################################
  exec command:   ./aescrypt -k [key] -i [input_file] -t [num_of_threads] -p [split_part_size] 
  Example:        ./aescrypt -k 000102030405060708090a0b0c0d0e0f -i book.pdf -t 4 -p 2097152 
