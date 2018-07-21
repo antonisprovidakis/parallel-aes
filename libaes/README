@@ -1,0 +1,68 @@
++----------------------------------------------------------------+
+|	       	       	       	       	       	                       |
+|	             ** libaes **                                      |
+|      	                                                         |
+|      	                                                         |
+|      	         -- Quentin Carbonneaux  2009 --                 |
+|      	         -- <qcarbonneaux@gmail.com>  --                 |
+|      	      	    		     	    	                             |
++----------------------------------------------------------------+
+
+  libaes is a program distributed under the GPLv3 license,
+it was created by Quentin Carbonneaux. A copy of the GPL must
+be present in this package in the file COPYING.
+
+
+- LIBAES
+
+  libaes is a static library which provides basic AES encryption
+(using the Rijndael algorithm). In order to use it in you project you
+may include aes.h everywhere you need AES primitives then compile your
+code with the file aes.c.
+
+  You can also use the Makefile.lib provided. In order to do so,
+create a directory in your project's path, for example libaes. Copy
+aes.h aes.c tables.h Makefile.lib files (they are in a directory of
+this archive named libaes) to this directory. Rename "Makefile.lib" to
+"Makefile". Then, in every file you need libaes add this line
+
+#include <aes.h>
+
+To compile your code follow these steps :
+
+1 - compile libaes using the make command in libaes directory, for
+example add the following lines in your makefile :
+
+libaes.a:
+	cd pathtolibaes/libaes/ && make
+
+2 - add libaes.a as a dependency of your binary program in your
+makefile
+
+3 - compile your source files using these gcc arguments (add the
+libaes directory to your include path)
+
+   cc -Ipathtolibaes/libaes/ your_arguments your_sources.c
+
+4 - link your object files using these gcc arguments (add the libaes
+directory to your libraries path and link with libaes).
+
+   cc your_object_files -Lpathtolibaes/libaes/ -laes -o your_output_program
+
+A good example for this method can be found in this package (see the
+makefile of aescrypt).
+
+  The behavior of the library can be tested by going into the libaes
+directory and running "make check".
+
+  For educative purposes a file named aestables_main.c is included in
+the archive, it is the program that were used to genrate the
+pre-computed tables that can be found in file tables.h.
+
+For more informations on using libaes see aes.h (and aescrypt.c).
+
+
+- BUGS
+
+  You've spotted a bug, memory leak or anything else send me a mail at
+qcarbonneaux@gmail.com.

@@ -1,0 +1,45 @@
++----------------------------------------------------------------+
+|	       	       	       	       	       	                       |
+|	             ** aescrypt **                                    |
+|      	                                                         |
+|      	                                                         |
+|      	         -- Quentin Carbonneaux  2009 --                 |
+|      	         -- <qcarbonneaux@gmail.com>  --                 |
+|      	      	    		     	    	                             |
++----------------------------------------------------------------+
+
+  aescrypt is a program distributed under the GPLv3 license,
+it was created by Quentin Carbonneaux. A copy of the GPL must
+be present in this package in the file README.
+
+
+- AESCRYPT
+
+  aescrypt can encrypt and decrypt files using the AES-CBC
+algorithm. In order to install it just run
+
+$ make && make install
+
+Here are some examples of usage of aescrypt
+
+$ # classical encryption of file file0
+$ aescrypt -k 000102030405060708090a0b0c0d0e0f -i file0 -o file0.aes
+
+$ # the same thing
+$ aescrypt -k 000102030405060708090a0b0c0d0e0f < file0 > file0.aes
+
+$ # using a 192 bits key
+$ aescrypt -m 192 -k 000102030405060708090a0b0c0d0e0f1011121314151617 \
+  -i file0 -o file0.aes
+
+$ # create an encrypted archive
+$ tar zc mydir/ | aescrypt -k deadbeef -o mydir.tar.gz.aes
+
+$ # decrypt and untar it
+$ aescrypt -d -k deadbeef -i mydir.tar.gz.aes | tar zxv
+
+
+- BUGS
+
+  You've spotted a bug, memory leak or anything else send me a mail at
+qcarbonneaux@gmail.com.
